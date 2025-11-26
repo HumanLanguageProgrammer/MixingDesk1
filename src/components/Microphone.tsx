@@ -4,9 +4,10 @@ import { useState, useRef, useEffect } from 'react';
 
 interface MicrophoneProps {
   onSend: (message: string) => void;
+  disabled?: boolean;
 }
 
-export function Microphone({ onSend }: MicrophoneProps) {
+export function Microphone({ onSend, disabled = false }: MicrophoneProps) {
   const [input, setInput] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -42,14 +43,15 @@ export function Microphone({ onSend }: MicrophoneProps) {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Type a message..."
+            placeholder={disabled ? "Waiting for agent..." : "Type a message..."}
             rows={1}
-            className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-100 placeholder-gray-400"
+            disabled={disabled}
+            className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-100 placeholder-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
           />
         </div>
         <button
           type="submit"
-          disabled={!input.trim()}
+          disabled={!input.trim() || disabled}
           className="px-4 py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg transition-colors"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -58,7 +60,7 @@ export function Microphone({ onSend }: MicrophoneProps) {
         </button>
       </div>
       <p className="mt-2 text-xs text-gray-500">
-        Press Enter to send, Shift+Enter for new line
+        {disabled ? "Agent initializing..." : "Press Enter to send, Shift+Enter for new line"}
       </p>
     </form>
   );

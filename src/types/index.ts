@@ -9,6 +9,7 @@ export interface Message {
   speaker: 'visitor' | 'agent';
   content: string;
   timestamp: Date;
+  isStreaming?: boolean;
 }
 
 export interface ImageAsset {
@@ -69,4 +70,61 @@ export interface MessageRecord {
   sequence_number: number;
   tokens_used: number | null;
   created_at: string;
+}
+
+// ============================================
+// Phase B: Agent OS and LLM Integration
+// ============================================
+
+export interface AgentOS {
+  id: string;
+  agent_name: string;
+  description: string | null;
+  os_content: string;
+  version: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface ToolCall {
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+}
+
+export interface ToolResult {
+  tool_use_id: string;
+  content: string;
+}
+
+export interface AgentResponse {
+  message: string;
+  tool_calls?: ToolCall[];
+  tool_results?: ToolExecutionResult[];
+}
+
+export interface ToolExecutionResult {
+  tool: string;
+  success: boolean;
+  data?: {
+    image_url?: string;
+    content?: string;
+    title?: string;
+    library_items?: LibraryItem[];
+  };
+  error?: string;
+}
+
+export interface AgentState {
+  isInitialized: boolean;
+  isLoading: boolean;
+  agentOS: AgentOS | null;
+  conversationHistory: ChatMessage[];
+  error: string | null;
 }

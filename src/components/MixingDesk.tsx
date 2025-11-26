@@ -1,25 +1,36 @@
 // src/components/MixingDesk.tsx
+// PHASE B: Integrated with agent
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Turntable1 } from './Turntable1';
 import { Turntable2 } from './Turntable2';
 import { Microphone } from './Microphone';
 import { MessageHistory } from './MessageHistory';
 import { StatusIndicator } from './StatusIndicator';
+import { useAgent } from '../hooks/useAgent';
 import {
   testConnection,
-  fetchLibraryItems,
-  getStorageUrl,
   listStorageFiles
 } from '../lib/supabase';
-import type { Message, ConnectionStatus, LibraryItem, ImageAsset } from '../types';
+import type { Message, ConnectionStatus, ImageAsset, ToolExecutionResult } from '../types';
 
 export function MixingDesk() {
-  // State
+  // Agent state
+  const {
+    isInitialized: agentInitialized,
+    isLoading: agentLoading,
+    error: agentError,
+    agentOS,
+    initialize: initializeAgent,
+    chat,
+    clearError
+  } = useAgent();
+
+  // UI state
   const [messages, setMessages] = useState<Message[]>([]);
   const [currentImage, setCurrentImage] = useState<ImageAsset | null>(null);
   const [currentContent, setCurrentContent] = useState<string>('');
-  const [libraryItems, setLibraryItems] = useState<LibraryItem[]>([]);
+  const [currentContentTitle, setCurrentContentTitle] = useState<string>('');
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>({
     database: 'disconnected',
     storage: 'disconnected',
@@ -42,35 +53,13 @@ export function MixingDesk() {
         database: dbConnected ? 'connected' : 'error',
       }));
 
-      if (dbConnected) {
-        // Fetch library items
-        const items = await fetchLibraryItems();
-        setLibraryItems(items || []);
-
-        // Set initial content from first library item
-        if (items && items.length > 0) {
-          setCurrentContent(items[0].content);
-        }
-      }
-
-      // Test storage - list files and load first image
+      // Test storage
       try {
-        const files = await listStorageFiles('test-images');
+        await listStorageFiles('test-images');
         setConnectionStatus(prev => ({
           ...prev,
           storage: 'connected',
         }));
-
-        // Load first image if available
-        if (files && files.length > 0) {
-          const imageFile = files.find(f =>
-            f.name.match(/\.(jpg|jpeg|png|gif|webp)$/i)
-          );
-          if (imageFile) {
-            const url = getStorageUrl('test-images', imageFile.name);
-            setCurrentImage({ name: imageFile.name, url });
-          }
-        }
       } catch (storageError) {
         console.error('Storage error:', storageError);
         setConnectionStatus(prev => ({
@@ -79,6 +68,9 @@ export function MixingDesk() {
         }));
       }
 
+      // Initialize agent
+      await initializeAgent();
+
     } catch (error) {
       console.error('Initialization error:', error);
     } finally {
@@ -86,8 +78,38 @@ export function MixingDesk() {
     }
   }
 
+  // Process tool results from agent
+  const processToolResults = useCallback((results: ToolExecutionResult[]) => {
+    for (const result of results) {
+      if (!result.success) continue;
+
+      switch (result.tool) {
+        case 'display_image':
+          if (result.data?.image_url) {
+            setCurrentImage({
+              name: 'Agent displayed image',
+              url: result.data.image_url as string,
+            });
+          }
+          break;
+
+        case 'display_content':
+          if (result.data?.content) {
+            setCurrentContent(result.data.content as string);
+            setCurrentContentTitle((result.data.title as string) || '');
+          }
+          break;
+
+        case 'retrieve_library_item':
+          // Content will be displayed via display_content tool
+          // This just fetches the data
+          break;
+      }
+    }
+  }, []);
+
   // Handle visitor message submission
-  function handleSendMessage(content: string) {
+  async function handleSendMessage(content: string) {
     if (!content.trim()) return;
 
     // Add visitor message
@@ -100,22 +122,59 @@ export function MixingDesk() {
 
     setMessages(prev => [...prev, visitorMessage]);
 
-    // Add placeholder agent response
-    // (In Phase B, this will be replaced with LLM call)
-    setTimeout(() => {
-      const agentMessage: Message = {
+    // Check if agent is ready
+    if (!agentInitialized || !agentOS) {
+      const errorMessage: Message = {
         id: crypto.randomUUID(),
         speaker: 'agent',
-        content: `I received your message: "${content.trim()}". In Phase B, I'll be connected to an LLM and can provide real responses.`,
+        content: 'I\'m still initializing. Please wait a moment and try again.',
         timestamp: new Date(),
       };
-      setMessages(prev => [...prev, agentMessage]);
-    }, 500);
-  }
+      setMessages(prev => [...prev, errorMessage]);
+      return;
+    }
 
-  // Handle library item selection (for testing)
-  function handleSelectLibraryItem(item: LibraryItem) {
-    setCurrentContent(item.content);
+    // Add placeholder for streaming
+    const agentMessageId = crypto.randomUUID();
+    const agentMessage: Message = {
+      id: agentMessageId,
+      speaker: 'agent',
+      content: '',
+      timestamp: new Date(),
+      isStreaming: true,
+    };
+    setMessages(prev => [...prev, agentMessage]);
+
+    try {
+      // Get agent response
+      const { response, toolResults } = await chat(content.trim(), messages);
+
+      // Process any tool results (updates Turntables)
+      processToolResults(toolResults);
+
+      // Update agent message with response
+      setMessages(prev =>
+        prev.map(m =>
+          m.id === agentMessageId
+            ? { ...m, content: response, isStreaming: false }
+            : m
+        )
+      );
+
+    } catch (error) {
+      console.error('Chat error:', error);
+      setMessages(prev =>
+        prev.map(m =>
+          m.id === agentMessageId
+            ? {
+                ...m,
+                content: 'Sorry, I encountered an error. Please try again.',
+                isStreaming: false
+              }
+            : m
+        )
+      );
+    }
   }
 
   return (
@@ -126,11 +185,31 @@ export function MixingDesk() {
           <h1 className="text-xl font-semibold text-gray-100">
             Mixing Desk
             <span className="ml-2 text-sm font-normal text-gray-400">
-              Operation Basecamp
+              Operation Basecamp • Phase B
             </span>
+            {agentOS && (
+              <span className="ml-2 text-xs font-normal text-green-400">
+                ({agentOS.agent_name} v{agentOS.version})
+              </span>
+            )}
           </h1>
-          <StatusIndicator status={connectionStatus} isLoading={isLoading} />
+          <StatusIndicator
+            status={connectionStatus}
+            isLoading={isLoading}
+            agentStatus={agentInitialized ? 'connected' : agentLoading ? 'connecting' : 'disconnected'}
+          />
         </div>
+        {agentError && (
+          <div className="mt-2 text-sm text-red-400 flex items-center gap-2">
+            <span>Agent error: {agentError}</span>
+            <button
+              onClick={clearError}
+              className="text-xs underline hover:no-underline"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
       </header>
 
       {/* Main Content */}
@@ -149,8 +228,7 @@ export function MixingDesk() {
           <div className="flex-1 min-h-[300px]">
             <Turntable2
               content={currentContent}
-              libraryItems={libraryItems}
-              onSelectItem={handleSelectLibraryItem}
+              title={currentContentTitle}
               isLoading={isLoading}
             />
           </div>
@@ -165,7 +243,7 @@ export function MixingDesk() {
 
           {/* Microphone (Input) */}
           <div className="border-t border-gray-700">
-            <Microphone onSend={handleSendMessage} />
+            <Microphone onSend={handleSendMessage} disabled={!agentInitialized} />
           </div>
         </div>
       </main>
