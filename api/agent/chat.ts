@@ -1,22 +1,9 @@
 // api/agent/chat.ts
 // Vercel Serverless Function - Handles conversation with Claude
 
+import { VercelRequest, VercelResponse } from '@vercel/node';
 import Anthropic from '@anthropic-ai/sdk';
 import { createClient } from '@supabase/supabase-js';
-
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY!,
-});
-
-const supabase = createClient(
-  process.env.VITE_SUPABASE_URL!,
-  process.env.VITE_SUPABASE_ANON_KEY!
-);
-
-export const config = {
-  runtime: 'nodejs',
-  maxDuration: 30, // Allow longer for LLM responses
-};
 
 // Tool definitions for Claude
 const tools: Anthropic.Tool[] = [
@@ -69,7 +56,7 @@ const tools: Anthropic.Tool[] = [
 ];
 
 // Tool execution functions
-async function executeDisplayImage(input: { image_path: string }) {
+async function executeDisplayImage(input: { image_path: string }, supabase: any) {
   const { data } = supabase.storage
     .from('test-images')
     .getPublicUrl(input.image_path);
@@ -88,7 +75,7 @@ async function executeDisplayContent(input: { content: string; title?: string })
   };
 }
 
-async function executeRetrieveLibraryItem(input: { query: string }) {
+async function executeRetrieveLibraryItem(input: { query: string }, supabase: any) {
   // Search by title or topics
   const { data: items, error } = await supabase
     .from('library_items')
@@ -106,25 +93,22 @@ async function executeRetrieveLibraryItem(input: { query: string }) {
 }
 
 // Execute a tool call
-async function executeTool(name: string, input: Record<string, unknown>) {
+async function executeTool(name: string, input: Record<string, unknown>, supabase: any) {
   switch (name) {
     case 'display_image':
-      return executeDisplayImage(input as { image_path: string });
+      return executeDisplayImage(input as { image_path: string }, supabase);
     case 'display_content':
       return executeDisplayContent(input as { content: string; title?: string });
     case 'retrieve_library_item':
-      return executeRetrieveLibraryItem(input as { query: string });
+      return executeRetrieveLibraryItem(input as { query: string }, supabase);
     default:
       return { success: false, error: `Unknown tool: ${name}` };
   }
 }
 
-export default async function handler(request: Request) {
-  if (request.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: { 'Content-Type': 'application/json' },
-    });
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
@@ -135,40 +119,31 @@ export default async function handler(request: Request) {
 
     if (!anthropicKey) {
       console.error('Missing ANTHROPIC_API_KEY');
-      return new Response(
-        JSON.stringify({
-          error: 'Server configuration error',
-          details: 'ANTHROPIC_API_KEY not configured'
-        }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
-      );
+      return res.status(500).json({
+        error: 'Server configuration error',
+        details: 'ANTHROPIC_API_KEY not configured'
+      });
     }
 
     if (!supabaseUrl || !supabaseAnonKey) {
       console.error('Missing Supabase credentials');
-      return new Response(
-        JSON.stringify({
-          error: 'Server configuration error',
-          details: 'Supabase credentials not configured'
-        }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
-      );
+      return res.status(500).json({
+        error: 'Server configuration error',
+        details: 'Supabase credentials not configured'
+      });
     }
 
-    const { messages, systemPrompt } = await request.json();
+    const anthropic = new Anthropic({ apiKey: anthropicKey });
+    const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+    const { messages, systemPrompt } = req.body;
 
     if (!messages || !Array.isArray(messages)) {
-      return new Response(
-        JSON.stringify({ error: 'messages array is required' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
-      );
+      return res.status(400).json({ error: 'messages array is required' });
     }
 
     if (!systemPrompt) {
-      return new Response(
-        JSON.stringify({ error: 'systemPrompt is required' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
-      );
+      return res.status(400).json({ error: 'systemPrompt is required' });
     }
 
     console.log('Processing chat request with', messages.length, 'messages');
@@ -199,7 +174,7 @@ export default async function handler(request: Request) {
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
 
       for (const toolUse of toolUseBlocks) {
-        const result = await executeTool(toolUse.name, toolUse.input as Record<string, unknown>);
+        const result = await executeTool(toolUse.name, toolUse.input as Record<string, unknown>, supabase);
 
         // Track for UI
         toolExecutionResults.push({
@@ -236,25 +211,18 @@ export default async function handler(request: Request) {
       (block): block is Anthropic.TextBlock => block.type === 'text'
     );
 
-    return new Response(
-      JSON.stringify({
-        message: textContent?.text || '',
-        tool_results: toolExecutionResults,
-      }),
-      {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }
-    );
+    return res.status(200).json({
+      message: textContent?.text || '',
+      tool_results: toolExecutionResults,
+    });
 
   } catch (error) {
     console.error('Chat error:', error);
-    return new Response(
-      JSON.stringify({
-        error: 'Internal server error',
-        details: error instanceof Error ? error.message : 'Unknown error'
-      }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
-    );
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return res.status(500).json({
+      error: 'Internal server error',
+      details: errorMessage,
+      stack: process.env.NODE_ENV === 'development' && error instanceof Error ? error.stack : undefined
+    });
   }
 }

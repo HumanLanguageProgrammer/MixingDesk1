@@ -1,18 +1,12 @@
 // api/agent/init.ts
 // Vercel Serverless Function - Loads Agent OS from Supabase
 
+import { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 
-export const config = {
-  runtime: 'nodejs', // Using Node.js runtime for better compatibility
-};
-
-export default async function handler(request: Request) {
-  if (request.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: { 'Content-Type': 'application/json' },
-    });
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
@@ -25,24 +19,18 @@ export default async function handler(request: Request) {
         hasUrl: !!supabaseUrl,
         hasKey: !!supabaseKey
       });
-      return new Response(
-        JSON.stringify({
-          error: 'Server configuration error',
-          details: 'Missing Supabase credentials'
-        }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
-      );
+      return res.status(500).json({
+        error: 'Server configuration error',
+        details: 'Missing Supabase credentials'
+      });
     }
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const { agent_name } = await request.json();
+    const { agent_name } = req.body;
 
     if (!agent_name) {
-      return new Response(
-        JSON.stringify({ error: 'agent_name is required' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
-      );
+      return res.status(400).json({ error: 'agent_name is required' });
     }
 
     console.log('Loading Agent OS:', agent_name);
@@ -57,46 +45,34 @@ export default async function handler(request: Request) {
 
     if (error) {
       console.error('Supabase error:', error);
-      return new Response(
-        JSON.stringify({
-          error: 'Failed to load Agent OS',
-          details: error.message,
-          hint: error.hint || 'Check if agent_os table exists and has data'
-        }),
-        { status: 404, headers: { 'Content-Type': 'application/json' } }
-      );
+      return res.status(404).json({
+        error: 'Failed to load Agent OS',
+        details: error.message,
+        hint: error.hint || 'Check if agent_os table exists and has data'
+      });
     }
 
     if (!agentOS) {
       console.error('No Agent OS found for:', agent_name);
-      return new Response(
-        JSON.stringify({
-          error: 'Agent OS not found',
-          details: `No active agent with name "${agent_name}"`,
-          hint: 'Check Supabase agent_os table'
-        }),
-        { status: 404, headers: { 'Content-Type': 'application/json' } }
-      );
+      return res.status(404).json({
+        error: 'Agent OS not found',
+        details: `No active agent with name "${agent_name}"`,
+        hint: 'Check Supabase agent_os table'
+      });
     }
 
     console.log('Agent OS loaded successfully:', agentOS.agent_name);
 
     // Return the Agent OS
-    return new Response(JSON.stringify({ agentOS }), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return res.status(200).json({ agentOS });
 
   } catch (error) {
     console.error('Init error:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return new Response(
-      JSON.stringify({
-        error: 'Internal server error',
-        details: errorMessage,
-        stack: error instanceof Error ? error.stack : undefined
-      }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
-    );
+    return res.status(500).json({
+      error: 'Internal server error',
+      details: errorMessage,
+      stack: process.env.NODE_ENV === 'development' && error instanceof Error ? error.stack : undefined
+    });
   }
 }
