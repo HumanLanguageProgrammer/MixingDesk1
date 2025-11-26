@@ -26,7 +26,10 @@ export async function initializeAgent(): Promise<InitResponse> {
 
   if (!response.ok) {
     const error = await response.json();
-    throw new Error(error.error || 'Failed to initialize agent');
+    const errorMsg = error.details
+      ? `${error.error}: ${error.details}${error.hint ? ` (${error.hint})` : ''}`
+      : error.error || 'Failed to initialize agent';
+    throw new Error(errorMsg);
   }
 
   return response.json();
@@ -47,7 +50,10 @@ export async function sendMessage(
 
   if (!response.ok) {
     const error = await response.json();
-    throw new Error(error.error || 'Failed to send message');
+    const errorMsg = error.details
+      ? `${error.error}: ${error.details}`
+      : error.error || 'Failed to send message';
+    throw new Error(errorMsg);
   }
 
   return response.json();

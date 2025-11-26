@@ -3,13 +3,8 @@
 
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.VITE_SUPABASE_URL!,
-  process.env.VITE_SUPABASE_ANON_KEY!
-);
-
 export const config = {
-  runtime: 'edge', // Use edge runtime for speed
+  runtime: 'nodejs', // Using Node.js runtime for better compatibility
 };
 
 export default async function handler(request: Request) {
@@ -21,6 +16,26 @@ export default async function handler(request: Request) {
   }
 
   try {
+    // Validate environment variables
+    const supabaseUrl = process.env.VITE_SUPABASE_URL;
+    const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY;
+
+    if (!supabaseUrl || !supabaseKey) {
+      console.error('Missing Supabase env vars:', {
+        hasUrl: !!supabaseUrl,
+        hasKey: !!supabaseKey
+      });
+      return new Response(
+        JSON.stringify({
+          error: 'Server configuration error',
+          details: 'Missing Supabase credentials'
+        }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
     const { agent_name } = await request.json();
 
     if (!agent_name) {
@@ -30,6 +45,8 @@ export default async function handler(request: Request) {
       );
     }
 
+    console.log('Loading Agent OS:', agent_name);
+
     // Fetch Agent OS from Supabase
     const { data: agentOS, error } = await supabase
       .from('agent_os')
@@ -38,13 +55,31 @@ export default async function handler(request: Request) {
       .eq('is_active', true)
       .single();
 
-    if (error || !agentOS) {
-      console.error('Error loading Agent OS:', error);
+    if (error) {
+      console.error('Supabase error:', error);
       return new Response(
-        JSON.stringify({ error: 'Agent OS not found', details: error?.message }),
+        JSON.stringify({
+          error: 'Failed to load Agent OS',
+          details: error.message,
+          hint: error.hint || 'Check if agent_os table exists and has data'
+        }),
         { status: 404, headers: { 'Content-Type': 'application/json' } }
       );
     }
+
+    if (!agentOS) {
+      console.error('No Agent OS found for:', agent_name);
+      return new Response(
+        JSON.stringify({
+          error: 'Agent OS not found',
+          details: `No active agent with name "${agent_name}"`,
+          hint: 'Check Supabase agent_os table'
+        }),
+        { status: 404, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    console.log('Agent OS loaded successfully:', agentOS.agent_name);
 
     // Return the Agent OS
     return new Response(JSON.stringify({ agentOS }), {
@@ -54,8 +89,13 @@ export default async function handler(request: Request) {
 
   } catch (error) {
     console.error('Init error:', error);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     return new Response(
-      JSON.stringify({ error: 'Internal server error' }),
+      JSON.stringify({
+        error: 'Internal server error',
+        details: errorMessage,
+        stack: error instanceof Error ? error.stack : undefined
+      }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }
     );
   }

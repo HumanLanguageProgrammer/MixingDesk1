@@ -14,7 +14,7 @@ const supabase = createClient(
 );
 
 export const config = {
-  runtime: 'edge',
+  runtime: 'nodejs',
   maxDuration: 30, // Allow longer for LLM responses
 };
 
@@ -128,6 +128,33 @@ export default async function handler(request: Request) {
   }
 
   try {
+    // Validate environment variables
+    const anthropicKey = process.env.ANTHROPIC_API_KEY;
+    const supabaseUrl = process.env.VITE_SUPABASE_URL;
+    const supabaseAnonKey = process.env.VITE_SUPABASE_ANON_KEY;
+
+    if (!anthropicKey) {
+      console.error('Missing ANTHROPIC_API_KEY');
+      return new Response(
+        JSON.stringify({
+          error: 'Server configuration error',
+          details: 'ANTHROPIC_API_KEY not configured'
+        }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    if (!supabaseUrl || !supabaseAnonKey) {
+      console.error('Missing Supabase credentials');
+      return new Response(
+        JSON.stringify({
+          error: 'Server configuration error',
+          details: 'Supabase credentials not configured'
+        }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
     const { messages, systemPrompt } = await request.json();
 
     if (!messages || !Array.isArray(messages)) {
@@ -143,6 +170,8 @@ export default async function handler(request: Request) {
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
     }
+
+    console.log('Processing chat request with', messages.length, 'messages');
 
     // Call Claude API
     let response = await anthropic.messages.create({
