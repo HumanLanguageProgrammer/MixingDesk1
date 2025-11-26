@@ -1,5 +1,6 @@
 // api/agent/init.ts
 // Vercel Serverless Function - Loads Agent OS from Supabase
+// Using Node.js runtime with proper VercelRequest/VercelResponse signature
 
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
