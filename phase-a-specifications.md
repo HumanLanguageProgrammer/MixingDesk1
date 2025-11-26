@@ -66,6 +66,72 @@ Environment Variables Needed:
 
 ---
 
+## Database Schemas (Actual)
+
+### sessions table
+
+```sql
+create table public.sessions (
+  id uuid not null default extensions.uuid_generate_v4 (),
+  session_identifier text not null,
+  visitor_context jsonb null,
+  started_at timestamp with time zone null default now(),
+  last_active_at timestamp with time zone null default now(),
+  status text null default 'active'::text,
+  created_at timestamp with time zone null default now(),
+  updated_at timestamp with time zone null default now(),
+  constraint sessions_pkey primary key (id),
+  constraint sessions_session_identifier_key unique (session_identifier),
+  constraint sessions_status_check check (
+    (status = any (array['active'::text, 'completed'::text, 'abandoned'::text]))
+  )
+);
+
+create index idx_sessions_identifier on public.sessions using btree (session_identifier);
+create index idx_sessions_status on public.sessions using btree (status);
+```
+
+### messages table
+
+```sql
+create table public.messages (
+  id uuid not null default extensions.uuid_generate_v4 (),
+  session_id uuid null,
+  speaker text not null,
+  content text not null,
+  message_type text null default 'text'::text,
+  sequence_number integer not null,
+  tokens_used integer null,
+  created_at timestamp with time zone null default now(),
+  constraint messages_pkey primary key (id),
+  constraint messages_session_id_sequence_number_key unique (session_id, sequence_number),
+  constraint messages_session_id_fkey foreign key (session_id) references sessions (id) on delete cascade,
+  constraint messages_message_type_check check (
+    (message_type = any (array['text'::text, 'voice'::text, 'system'::text]))
+  ),
+  constraint messages_speaker_check check (
+    (speaker = any (array['visitor'::text, 'agent'::text]))
+  )
+);
+
+create index idx_messages_session on public.messages using btree (session_id, sequence_number);
+create index idx_messages_created on public.messages using btree (created_at desc);
+```
+
+### library_items table
+
+```sql
+-- Columns: id, title, content, content_type, tags, topics, complexity,
+--          retrieval_count, last_retrieved_at, created_at, updated_at
+
+-- Sample data exists:
+-- - "Mixing Desk UI Components" (simple)
+-- - "Testing Agent Architecture" (intermediate)
+-- - "Platform Validation Overview" (simple)
+```
+
+---
+
 ## Project Structure
 
 ```
@@ -105,22 +171,15 @@ mixing-desk/
 ```typescript
 // src/types/index.ts
 
+// ============================================
+// Local UI State (Phase A - not persisted)
+// ============================================
+
 export interface Message {
   id: string;
   speaker: 'visitor' | 'agent';
   content: string;
   timestamp: Date;
-}
-
-export interface LibraryItem {
-  id: string;
-  title: string;
-  content: string;
-  item_type: 'text' | 'prompt' | 'instruction';
-  complexity: 'simple' | 'intermediate' | 'advanced';
-  topics: string[];
-  tags: string[];
-  created_at: string;
 }
 
 export interface ImageAsset {
@@ -139,6 +198,48 @@ export interface MixingDeskState {
   currentContent: string;
   connectionStatus: ConnectionStatus;
   isLoading: boolean;
+}
+
+// ============================================
+// Database Records (matches Supabase schema)
+// ============================================
+
+export interface LibraryItem {
+  id: string;
+  title: string;
+  content: string;
+  content_type: string;  // e.g., 'reference'
+  complexity: 'simple' | 'intermediate' | 'advanced';
+  topics: string[];
+  tags: string[];
+  retrieval_count: number;
+  last_retrieved_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// For Phase B - database persistence
+export interface SessionRecord {
+  id: string;
+  session_identifier: string;
+  visitor_context: Record<string, unknown> | null;
+  started_at: string;
+  last_active_at: string;
+  status: 'active' | 'completed' | 'abandoned';
+  created_at: string;
+  updated_at: string;
+}
+
+// For Phase B - database persistence
+export interface MessageRecord {
+  id: string;
+  session_id: string | null;
+  speaker: 'visitor' | 'agent';
+  content: string;
+  message_type: 'text' | 'voice' | 'system';
+  sequence_number: number;
+  tokens_used: number | null;
+  created_at: string;
 }
 ```
 
@@ -732,18 +833,15 @@ export function StatusIndicator({ status, isLoading }: StatusIndicatorProps) {
     );
   }
 
-  const allConnected = status.database === 'connected' && status.storage === 'connected';
-  const hasError = status.database === 'error' || status.storage === 'error';
-
   return (
     <div className="flex items-center gap-4">
-      <StatusDot 
-        label="Database" 
-        status={status.database} 
+      <StatusDot
+        label="Database"
+        status={status.database}
       />
-      <StatusDot 
-        label="Storage" 
-        status={status.storage} 
+      <StatusDot
+        label="Storage"
+        status={status.storage}
       />
     </div>
   );
