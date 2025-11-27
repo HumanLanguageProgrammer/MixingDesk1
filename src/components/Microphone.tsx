@@ -70,13 +70,18 @@ export function Microphone({
 
     const result = await onStopRecording();
 
+    console.log('Voice recording result:', result);
+
     if (result && result.text.trim()) {
+      console.log('Sending transcribed text:', result.text);
       // Use emotion-aware send if available
       if (onSendWithEmotion && result.emotions && result.prosody) {
         onSendWithEmotion(result.text, result.emotions, result.prosody);
       } else {
         onSend(result.text);
       }
+    } else {
+      console.log('No text to send - result:', result);
     }
   }
 
