@@ -128,3 +128,78 @@ export interface AgentState {
   conversationHistory: ChatMessage[];
   error: string | null;
 }
+
+// ============================================
+// Phase C: Voice and Emotional Agency
+// ============================================
+
+// Emotion detection from Hume STT
+export interface DetectedEmotion {
+  emotion: string;
+  score: number;  // 0-1
+}
+
+export interface EmotionAnalysis {
+  primary: DetectedEmotion;
+  secondary?: DetectedEmotion;
+  raw: Record<string, number>;  // All detected emotions
+}
+
+export interface ProsodyAnalysis {
+  pace: 'slow' | 'normal' | 'fast';
+  tone: 'hesitant' | 'neutral' | 'engaged' | 'excited';
+  volume: 'quiet' | 'normal' | 'loud';
+}
+
+// STT Response
+export interface STTResponse {
+  text: string;
+  emotions: EmotionAnalysis;
+  prosody: ProsodyAnalysis;
+  confidence: number;
+  duration_ms: number;
+}
+
+// Emotional delivery (agent's chosen voice expression)
+export interface EmotionalDelivery {
+  tone: 'excited' | 'calm' | 'empathetic' | 'confident' | 'warm' | 'professional' | 'neutral';
+  intensity: number;  // 0-1
+  pacing: 'energetic' | 'measured' | 'gentle' | 'normal';
+}
+
+// TTS Request
+export interface TTSRequest {
+  text: string;
+  voice_id: string;
+  emotional_delivery?: EmotionalDelivery;
+}
+
+// Voice state
+export interface VoiceState {
+  isEnabled: boolean;
+  isRecording: boolean;
+  isProcessingSTT: boolean;
+  isPlayingTTS: boolean;
+  currentTranscription: string;
+  error: string | null;
+}
+
+// Emotional context for chat requests
+export interface EmotionalContext {
+  detected_emotions: EmotionAnalysis;
+  prosody: ProsodyAnalysis;
+}
+
+// Extended Message with voice metadata
+export interface VoiceMessage extends Message {
+  inputMethod?: 'text' | 'voice';
+  emotionalContext?: EmotionAnalysis;      // For visitor messages
+  emotionalDelivery?: EmotionalDelivery;   // For agent messages
+  hasAudio?: boolean;
+  audioUrl?: string;
+}
+
+// Extended AgentResponse with emotional delivery
+export interface AgentResponseWithEmotion extends AgentResponse {
+  emotional_delivery?: EmotionalDelivery;
+}

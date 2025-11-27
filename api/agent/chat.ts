@@ -53,6 +53,31 @@ const tools: Anthropic.Tool[] = [
       required: ['query'],
     },
   },
+  // Phase C: Emotional delivery tool
+  {
+    name: 'set_emotional_delivery',
+    description: 'Specify how this response should be spoken. Use this to choose your vocal tone, intensity, and pacing based on the conversation context and visitor emotional state. This gives you agency over your voice expression.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        tone: {
+          type: 'string',
+          enum: ['excited', 'calm', 'empathetic', 'confident', 'warm', 'professional', 'neutral'],
+          description: 'The emotional tone for delivery. Choose based on visitor emotion and context.',
+        },
+        intensity: {
+          type: 'number',
+          description: 'Intensity of the emotion (0.0 to 1.0). Higher values mean more expressive.',
+        },
+        pacing: {
+          type: 'string',
+          enum: ['energetic', 'measured', 'gentle', 'normal'],
+          description: 'Speech pacing/rhythm. Energetic for excitement, gentle for reassurance, measured for clarity.',
+        },
+      },
+      required: ['tone'],
+    },
+  },
 ];
 
 // Tool execution functions
@@ -92,6 +117,28 @@ async function executeRetrieveLibraryItem(input: { query: string }, supabase: an
   };
 }
 
+// Phase C: Handle emotional delivery specification
+interface EmotionalDelivery {
+  tone: string;
+  intensity: number;
+  pacing: string;
+}
+
+function executeSetEmotionalDelivery(input: {
+  tone: string;
+  intensity?: number;
+  pacing?: string;
+}): { success: boolean; emotional_delivery: EmotionalDelivery } {
+  return {
+    success: true,
+    emotional_delivery: {
+      tone: input.tone,
+      intensity: input.intensity ?? 0.7,
+      pacing: input.pacing ?? 'normal',
+    },
+  };
+}
+
 // Execute a tool call
 async function executeTool(name: string, input: Record<string, unknown>, supabase: any) {
   switch (name) {
@@ -101,6 +148,8 @@ async function executeTool(name: string, input: Record<string, unknown>, supabas
       return executeDisplayContent(input as { content: string; title?: string });
     case 'retrieve_library_item':
       return executeRetrieveLibraryItem(input as { query: string }, supabase);
+    case 'set_emotional_delivery':
+      return executeSetEmotionalDelivery(input as { tone: string; intensity?: number; pacing?: string });
     default:
       return { success: false, error: `Unknown tool: ${name}` };
   }
@@ -136,7 +185,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const anthropic = new Anthropic({ apiKey: anthropicKey });
     const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-    const { messages, systemPrompt } = req.body;
+    const { messages, systemPrompt, emotionalContext } = req.body;
 
     if (!messages || !Array.isArray(messages)) {
       return res.status(400).json({ error: 'messages array is required' });
@@ -148,11 +197,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     console.log('Processing chat request with', messages.length, 'messages');
 
+    // Phase C: Enhance system prompt with emotional context if provided
+    let enhancedSystemPrompt = systemPrompt;
+    if (emotionalContext) {
+      enhancedSystemPrompt += `
+
+## Current Visitor Emotional State
+
+The visitor's most recent message was detected with the following emotional context:
+- Primary emotion: ${emotionalContext.detected_emotions?.primary?.emotion || 'unknown'} (${Math.round((emotionalContext.detected_emotions?.primary?.score || 0) * 100)}%)
+${emotionalContext.detected_emotions?.secondary ? `- Secondary emotion: ${emotionalContext.detected_emotions.secondary.emotion} (${Math.round(emotionalContext.detected_emotions.secondary.score * 100)}%)` : ''}
+- Speaking pace: ${emotionalContext.prosody?.pace || 'normal'}
+- Tone: ${emotionalContext.prosody?.tone || 'neutral'}
+
+Consider this emotional context when:
+1. Deciding how to respond (content and approach)
+2. Choosing your emotional delivery using the set_emotional_delivery tool
+3. Determining whether to use other tools
+
+Remember: You have emotional agency. You can choose to:
+- Match their energy (if positive engagement)
+- De-escalate (if frustrated or upset)
+- Encourage (if uncertain)
+- Stay professional (if appropriate)
+
+Use the set_emotional_delivery tool to specify how your response should be spoken.`;
+    }
+
     // Call Claude API
     let response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 1024,
-      system: systemPrompt,
+      system: enhancedSystemPrompt,
       tools: tools,
       messages: messages,
     });
@@ -165,6 +241,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       error?: string;
     }> = [];
 
+    // Phase C: Track emotional delivery choice
+    let emotionalDelivery: EmotionalDelivery | undefined;
+
     // Handle tool use loop
     while (response.stop_reason === 'tool_use') {
       const toolUseBlocks = response.content.filter(
@@ -176,13 +255,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       for (const toolUse of toolUseBlocks) {
         const result = await executeTool(toolUse.name, toolUse.input as Record<string, unknown>, supabase);
 
-        // Track for UI
-        toolExecutionResults.push({
-          tool: toolUse.name,
-          success: result.success,
-          data: result.success ? result : undefined,
-          error: result.success ? undefined : (result as { error: string }).error,
-        });
+        // Phase C: Capture emotional delivery if set
+        if (toolUse.name === 'set_emotional_delivery' && result.success) {
+          emotionalDelivery = (result as { success: boolean; emotional_delivery: EmotionalDelivery }).emotional_delivery;
+        }
+
+        // Track for UI (exclude emotional delivery from tool_results)
+        if (toolUse.name !== 'set_emotional_delivery') {
+          toolExecutionResults.push({
+            tool: toolUse.name,
+            success: result.success,
+            data: result.success ? result : undefined,
+            error: result.success ? undefined : (result as { error: string }).error,
+          });
+        }
 
         // Format for Claude
         toolResults.push({
@@ -196,7 +282,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       response = await anthropic.messages.create({
         model: 'claude-sonnet-4-20250514',
         max_tokens: 1024,
-        system: systemPrompt,
+        system: enhancedSystemPrompt,
         tools: tools,
         messages: [
           ...messages,
@@ -214,6 +300,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({
       message: textContent?.text || '',
       tool_results: toolExecutionResults,
+      emotional_delivery: emotionalDelivery,  // Phase C: Include emotional delivery
     });
 
   } catch (error) {

@@ -1,9 +1,16 @@
 // src/hooks/useAgent.ts
 // React hook for agent state management
+// Phase C: Updated with emotional context support
 
 import { useState, useCallback } from 'react';
 import { initializeAgent, sendMessage, toClaudeMessages } from '../lib/agent';
-import type { AgentOS, Message, ToolExecutionResult } from '../types';
+import type { AgentOS, Message, ToolExecutionResult, EmotionalDelivery, EmotionalContext } from '../types';
+
+export interface ChatResult {
+  response: string;
+  toolResults: ToolExecutionResult[];
+  emotionalDelivery?: EmotionalDelivery;  // Phase C
+}
 
 export interface UseAgentReturn {
   // State
@@ -14,10 +21,12 @@ export interface UseAgentReturn {
 
   // Actions
   initialize: () => Promise<void>;
-  chat: (userMessage: string, messageHistory: Message[]) => Promise<{
-    response: string;
-    toolResults: ToolExecutionResult[];
-  }>;
+  chat: (userMessage: string, messageHistory: Message[]) => Promise<ChatResult>;
+  chatWithEmotion: (
+    userMessage: string,
+    messageHistory: Message[],
+    emotionalContext: EmotionalContext
+  ) => Promise<ChatResult>;  // Phase C
   clearError: () => void;
 }
 
@@ -43,10 +52,12 @@ export function useAgent(): UseAgentReturn {
     }
   }, []);
 
-  const chat = useCallback(async (
+  // Core chat function with optional emotional context
+  const performChat = useCallback(async (
     userMessage: string,
-    messageHistory: Message[]
-  ): Promise<{ response: string; toolResults: ToolExecutionResult[] }> => {
+    messageHistory: Message[],
+    emotionalContext?: EmotionalContext
+  ): Promise<ChatResult> => {
     if (!agentOS) {
       throw new Error('Agent not initialized');
     }
@@ -63,15 +74,17 @@ export function useAgent(): UseAgentReturn {
       // Add current user message
       claudeMessages.push({ role: 'user', content: userMessage });
 
-      // Send to agent
-      const { message, tool_results } = await sendMessage(
+      // Send to agent (with or without emotional context)
+      const { message, tool_results, emotional_delivery } = await sendMessage(
         claudeMessages,
-        agentOS.os_content
+        agentOS.os_content,
+        emotionalContext
       );
 
       return {
         response: message,
         toolResults: tool_results || [],
+        emotionalDelivery: emotional_delivery,
       };
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to send message';
@@ -81,6 +94,23 @@ export function useAgent(): UseAgentReturn {
       setIsLoading(false);
     }
   }, [agentOS]);
+
+  // Standard chat (no emotional context)
+  const chat = useCallback(async (
+    userMessage: string,
+    messageHistory: Message[]
+  ): Promise<ChatResult> => {
+    return performChat(userMessage, messageHistory);
+  }, [performChat]);
+
+  // Chat with emotional context (Phase C)
+  const chatWithEmotion = useCallback(async (
+    userMessage: string,
+    messageHistory: Message[],
+    emotionalContext: EmotionalContext
+  ): Promise<ChatResult> => {
+    return performChat(userMessage, messageHistory, emotionalContext);
+  }, [performChat]);
 
   const clearError = useCallback(() => {
     setError(null);
@@ -93,6 +123,7 @@ export function useAgent(): UseAgentReturn {
     agentOS,
     initialize,
     chat,
+    chatWithEmotion,
     clearError,
   };
 }

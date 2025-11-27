@@ -1,7 +1,7 @@
 // src/lib/agent.ts
 // Client-side functions for interacting with agent API
 
-import type { AgentOS, ChatMessage, ToolExecutionResult } from '../types';
+import type { AgentOS, ChatMessage, ToolExecutionResult, EmotionalDelivery, EmotionalContext } from '../types';
 
 const AGENT_NAME = import.meta.env.VITE_AGENT_NAME || 'testing-agent';
 
@@ -12,6 +12,7 @@ export interface InitResponse {
 export interface ChatResponse {
   message: string;
   tool_results?: ToolExecutionResult[];
+  emotional_delivery?: EmotionalDelivery;  // Phase C
 }
 
 /**
@@ -40,12 +41,17 @@ export async function initializeAgent(): Promise<InitResponse> {
  */
 export async function sendMessage(
   messages: ChatMessage[],
-  systemPrompt: string
+  systemPrompt: string,
+  emotionalContext?: EmotionalContext
 ): Promise<ChatResponse> {
   const response = await fetch('/api/agent/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages, systemPrompt }),
+    body: JSON.stringify({
+      messages,
+      systemPrompt,
+      emotionalContext,  // Phase C: Include emotional context if provided
+    }),
   });
 
   if (!response.ok) {
