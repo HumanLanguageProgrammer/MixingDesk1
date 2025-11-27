@@ -63,10 +63,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const extension = extensionMap[mimeType || 'audio/webm'] || extensionMap[cleanMimeType] || 'webm';
     const filename = `audio.${extension}`;
 
+    // Check if the buffer looks like a valid webm file (EBML header: 1A 45 DF A3)
+    const magicBytes = audioBuffer.slice(0, 4).toString('hex');
+    const isValidWebm = magicBytes === '1a45dfa3';
+
     console.log('Sending to Whisper API:', {
       filename,
       contentType: cleanMimeType,
       bufferSize: audioBuffer.length,
+      magicBytes,
+      isValidWebm,
     });
 
     // Initialize OpenAI client
@@ -74,8 +80,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       apiKey: openaiApiKey,
     });
 
-    // Create a File object using OpenAI's toFile helper (works across Node.js versions)
-    const file = await toFile(audioBuffer, filename, { type: cleanMimeType });
+    // Create file using toFile with explicit Uint8Array conversion
+    // This ensures proper binary handling across Node.js versions
+    const file = await toFile(
+      new Uint8Array(audioBuffer.buffer, audioBuffer.byteOffset, audioBuffer.length),
+      filename,
+      { type: cleanMimeType }
+    );
 
     // Call Whisper API using the official SDK
     const transcription = await openai.audio.transcriptions.create({
