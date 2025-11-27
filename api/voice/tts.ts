@@ -94,7 +94,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     // Call Hume TTS API
-    // Using the Octave TTS endpoint (newer API)
+    // Using the Octave TTS endpoint
+    // Note: The /v0/tts/file endpoint doesn't accept voice selection - uses default voice
     const requestBody = {
       utterances: [
         {
@@ -105,14 +106,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       format: {
         type: 'mp3',
       },
-      // Use voice name instead of ID if available
-      ...(humeVoiceId && { voice: { name: humeVoiceId } }),
     };
 
     console.log('Calling Hume TTS API:', {
       url: 'https://api.hume.ai/v0/tts/file',
       textLength: text.length,
-      voice: humeVoiceId,
+      requestBody: JSON.stringify(requestBody),
     });
 
     const humeResponse = await fetch('https://api.hume.ai/v0/tts/file', {
