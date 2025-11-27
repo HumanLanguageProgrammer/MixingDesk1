@@ -4,20 +4,47 @@
 import type { STTResponse, EmotionalDelivery } from '../types';
 
 /**
+ * Convert blob to base64
+ */
+async function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64 = reader.result as string;
+      // Remove data URL prefix (e.g., "data:audio/webm;base64,")
+      const base64Data = base64.split(',')[1];
+      resolve(base64Data);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
  * Send audio for speech-to-text processing with emotion detection
  */
 export async function speechToText(audioBlob: Blob): Promise<STTResponse> {
-  const formData = new FormData();
-  formData.append('audio', audioBlob, 'recording.webm');
+  // Convert blob to base64 for reliable serverless transmission
+  const audioBase64 = await blobToBase64(audioBlob);
+
+  console.log('Sending audio to STT:', {
+    originalSize: audioBlob.size,
+    base64Length: audioBase64.length,
+    mimeType: audioBlob.type,
+  });
 
   const response = await fetch('/api/voice/stt', {
     method: 'POST',
-    body: formData,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      audio: audioBase64,
+      mimeType: audioBlob.type,
+    }),
   });
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: 'STT processing failed' }));
-    throw new Error(error.error || 'STT processing failed');
+    throw new Error(error.details || error.error || 'STT processing failed');
   }
 
   return response.json();

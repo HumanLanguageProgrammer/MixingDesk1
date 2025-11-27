@@ -111,31 +111,47 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         return;
       }
 
-      // Capture the current onstop handler
-      const originalOnStop = mediaRecorder.onstop;
+      const mimeType = mediaRecorder.mimeType;
 
-      mediaRecorder.onstop = (event) => {
-        // Call original handler
-        if (originalOnStop) {
-          originalOnStop.call(mediaRecorder, event);
-        }
+      // Request final data before stopping
+      if (mediaRecorder.state === 'recording') {
+        mediaRecorder.requestData();
+      }
 
-        // Return the blob
-        const mimeType = mediaRecorder.mimeType;
-        const blob = new Blob(audioChunksRef.current, { type: mimeType });
+      // Small delay to ensure final chunk is captured
+      setTimeout(() => {
+        // Set up the stop handler
+        mediaRecorder.onstop = () => {
+          // Create blob from all collected chunks
+          const blob = new Blob(audioChunksRef.current, { type: mimeType });
 
-        // Cleanup stream
-        if (streamRef.current) {
-          streamRef.current.getTracks().forEach(track => track.stop());
-          streamRef.current = null;
-        }
+          console.log('Recording stopped. Chunks:', audioChunksRef.current.length, 'Size:', blob.size);
 
-        setIsRecording(false);
-        resolve(blob);
-      };
+          // Cleanup stream
+          if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop());
+            streamRef.current = null;
+          }
 
-      // Stop recording
-      mediaRecorder.stop();
+          // Stop duration tracking
+          if (durationIntervalRef.current) {
+            clearInterval(durationIntervalRef.current);
+            durationIntervalRef.current = null;
+          }
+
+          setIsRecording(false);
+          setAudioBlob(blob);
+
+          if (blob.size > 0) {
+            resolve(blob);
+          } else {
+            reject(new Error('No audio data captured'));
+          }
+        };
+
+        // Stop recording
+        mediaRecorder.stop();
+      }, 100);
     });
   }, []);
 
