@@ -113,6 +113,13 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         return;
       }
 
+      // Check minimum recording duration (500ms)
+      const recordingDuration = Date.now() - startTimeRef.current;
+      if (recordingDuration < 500) {
+        console.warn('Recording too short:', recordingDuration, 'ms');
+        // Still stop the recorder but warn
+      }
+
       const mimeType = mediaRecorder.mimeType;
 
       // Set up the stop handler - all data comes in ondataavailable before onstop
@@ -120,7 +127,7 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         // Create blob from all collected chunks
         const blob = new Blob(audioChunksRef.current, { type: mimeType });
 
-        console.log('Recording stopped. Chunks:', audioChunksRef.current.length, 'Size:', blob.size);
+        console.log('Recording stopped. Chunks:', audioChunksRef.current.length, 'Size:', blob.size, 'Duration:', recordingDuration, 'ms');
 
         // Cleanup stream
         if (streamRef.current) {
@@ -137,7 +144,10 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         setIsRecording(false);
         setAudioBlob(blob);
 
-        if (blob.size > 0) {
+        // Check for minimum viable recording size (at least 1KB)
+        if (blob.size < 1000) {
+          reject(new Error('Recording too short. Please hold the button and speak for at least 1 second.'));
+        } else if (blob.size > 0) {
           resolve(blob);
         } else {
           reject(new Error('No audio data captured'));
