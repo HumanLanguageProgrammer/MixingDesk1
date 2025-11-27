@@ -1,31 +1,45 @@
 // src/components/Microphone.tsx
+// Phase C: Updated with voice input support
 
 import { useState, useRef, useEffect } from 'react';
-import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
+import { VoiceButton } from './VoiceButton';
+import { AudioPlayer, AudioPlayerStyles } from './AudioPlayer';
+import type { STTResponse, EmotionAnalysis, ProsodyAnalysis } from '../types';
 
 interface MicrophoneProps {
   onSend: (message: string) => void;
+  onSendWithEmotion?: (
+    message: string,
+    emotions: EmotionAnalysis,
+    prosody: ProsodyAnalysis
+  ) => void;
+  disabled?: boolean;
+  // Voice state (passed from parent)
+  voiceEnabled?: boolean;
+  isRecording?: boolean;
+  recordingDuration?: number;
+  isProcessingSTT?: boolean;
+  isPlayingTTS?: boolean;
+  onStartRecording?: () => void;
+  onStopRecording?: () => Promise<STTResponse | null>;
+  onStopSpeaking?: () => void;
 }
 
-export function Microphone({ onSend }: MicrophoneProps) {
+export function Microphone({
+  onSend,
+  onSendWithEmotion,
+  disabled = false,
+  voiceEnabled = false,
+  isRecording = false,
+  recordingDuration = 0,
+  isProcessingSTT = false,
+  isPlayingTTS = false,
+  onStartRecording,
+  onStopRecording,
+  onStopSpeaking,
+}: MicrophoneProps) {
   const [input, setInput] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  const {
-    isRecording,
-    isProcessing,
-    error: voiceError,
-    startRecording,
-    stopRecording,
-  } = useVoiceRecorder({
-    onTranscription: (text) => {
-      // Append transcribed text to input
-      setInput((prev) => (prev ? `${prev} ${text}` : text));
-    },
-    onError: (error) => {
-      console.error('Voice error:', error);
-    },
-  });
 
   // Auto-resize textarea
   useEffect(() => {
@@ -37,7 +51,7 @@ export function Microphone({ onSend }: MicrophoneProps) {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (input.trim()) {
+    if (input.trim() && !disabled) {
       onSend(input);
       setInput('');
     }
@@ -50,99 +64,102 @@ export function Microphone({ onSend }: MicrophoneProps) {
     }
   }
 
-  async function handleVoiceToggle() {
-    if (isRecording) {
-      await stopRecording();
-    } else {
-      await startRecording();
+  // Handle voice recording completion
+  async function handleVoiceStop() {
+    if (!onStopRecording) return;
+
+    const result = await onStopRecording();
+
+    if (result && result.text.trim()) {
+      // Use emotion-aware send if available
+      if (onSendWithEmotion && result.emotions && result.prosody) {
+        onSendWithEmotion(result.text, result.emotions, result.prosody);
+      } else {
+        onSend(result.text);
+      }
     }
   }
 
+  const isVoiceActive = isRecording || isProcessingSTT;
+  const showVoiceButton = voiceEnabled && onStartRecording && onStopRecording;
+
   return (
-    <form onSubmit={handleSubmit} className="p-4 bg-gray-800">
-      {/* Voice error message */}
-      {voiceError && (
-        <div className="mb-2 px-3 py-2 bg-red-900/50 border border-red-700 rounded-lg text-red-300 text-sm">
-          {voiceError}
+    <div className="p-4 bg-gray-800">
+      {/* Audio player styles */}
+      <AudioPlayerStyles />
+
+      {/* TTS playback indicator */}
+      {isPlayingTTS && (
+        <div className="mb-3">
+          <AudioPlayer isPlaying={isPlayingTTS} onStop={onStopSpeaking} />
         </div>
       )}
 
-      <div className="flex gap-3">
-        {/* Voice recording button */}
-        <button
-          type="button"
-          onClick={handleVoiceToggle}
-          disabled={isProcessing}
-          className={`px-4 py-3 rounded-lg transition-colors flex items-center justify-center ${
-            isRecording
-              ? 'bg-red-600 hover:bg-red-500 animate-pulse'
-              : isProcessing
-              ? 'bg-gray-600 cursor-wait'
-              : 'bg-gray-700 hover:bg-gray-600'
-          }`}
-          title={isRecording ? 'Stop recording' : isProcessing ? 'Processing...' : 'Start voice recording'}
-        >
-          {isProcessing ? (
-            // Spinner icon
-            <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
-              <circle
-                className="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                strokeWidth="4"
-              />
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-              />
-            </svg>
-          ) : (
-            // Microphone icon
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
-              />
-            </svg>
-          )}
-        </button>
+      <form onSubmit={handleSubmit}>
+        <div className="flex gap-3">
+          {/* Text input */}
+          <div className="flex-1 relative">
+            <textarea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={
+                isRecording
+                  ? 'Recording...'
+                  : isProcessingSTT
+                    ? 'Transcribing...'
+                    : disabled
+                      ? 'Waiting for agent...'
+                      : voiceEnabled
+                        ? 'Type or hold to speak...'
+                        : 'Type a message...'
+              }
+              rows={1}
+              disabled={disabled || isVoiceActive}
+              className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-100 placeholder-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
+            />
+          </div>
 
-        {/* Text input */}
-        <div className="flex-1 relative">
-          <textarea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={isRecording ? 'Recording... click mic to stop' : 'Type a message or use voice...'}
-            rows={1}
-            disabled={isRecording}
-            className="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-100 placeholder-gray-400 disabled:opacity-50"
-          />
+          {/* Voice button (Phase C) */}
+          {showVoiceButton && (
+            <VoiceButton
+              isRecording={isRecording}
+              isProcessing={isProcessingSTT}
+              isDisabled={disabled || isPlayingTTS}
+              duration={recordingDuration}
+              onStartRecording={onStartRecording}
+              onStopRecording={handleVoiceStop}
+            />
+          )}
+
+          {/* Send button */}
+          <button
+            type="submit"
+            disabled={!input.trim() || disabled || isVoiceActive}
+            className="px-4 py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg transition-colors"
+            aria-label="Send message"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+            </svg>
+          </button>
         </div>
 
-        {/* Send button */}
-        <button
-          type="submit"
-          disabled={!input.trim() || isRecording || isProcessing}
-          className="px-4 py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg transition-colors"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-          </svg>
-        </button>
-      </div>
-
-      <p className="mt-2 text-xs text-gray-500">
-        {isRecording
-          ? 'Recording... Click the microphone to stop and transcribe'
-          : 'Press Enter to send, Shift+Enter for new line, or use the microphone for voice input'}
-      </p>
-    </form>
+        {/* Help text */}
+        <p className="mt-2 text-xs text-gray-500">
+          {isRecording
+            ? 'Release to send voice message'
+            : isProcessingSTT
+              ? 'Processing your voice...'
+              : disabled
+                ? 'Agent initializing...'
+                : voiceEnabled
+                  ? 'Press Enter to send text, or hold the mic button to speak'
+                  : 'Press Enter to send, Shift+Enter for new line'
+          }
+        </p>
+      </form>
+    </div>
   );
 }
