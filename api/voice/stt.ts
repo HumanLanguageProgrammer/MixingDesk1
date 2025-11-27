@@ -118,13 +118,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     // Call OpenAI Whisper API
+    // Convert Buffer to Uint8Array for fetch compatibility
+    const bodyArray = new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
     const whisperResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${openaiApiKey}`,
         'Content-Type': `multipart/form-data; boundary=${boundary}`,
       },
-      body,
+      body: bodyArray,
     });
 
     if (!whisperResponse.ok) {
