@@ -77,8 +77,10 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         console.error('MediaRecorder error:', event);
       };
 
-      // Start recording
-      mediaRecorder.start(100); // Collect in 100ms chunks
+      // Start recording WITHOUT timeslice to get a complete WebM file
+      // Using timeslice can cause the header to be in a separate chunk
+      // which may get lost or cause issues with reassembly
+      mediaRecorder.start();
       setIsRecording(true);
 
       // Track duration
@@ -113,45 +115,37 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
 
       const mimeType = mediaRecorder.mimeType;
 
-      // Request final data before stopping
-      if (mediaRecorder.state === 'recording') {
-        mediaRecorder.requestData();
-      }
+      // Set up the stop handler - all data comes in ondataavailable before onstop
+      mediaRecorder.onstop = () => {
+        // Create blob from all collected chunks
+        const blob = new Blob(audioChunksRef.current, { type: mimeType });
 
-      // Small delay to ensure final chunk is captured
-      setTimeout(() => {
-        // Set up the stop handler
-        mediaRecorder.onstop = () => {
-          // Create blob from all collected chunks
-          const blob = new Blob(audioChunksRef.current, { type: mimeType });
+        console.log('Recording stopped. Chunks:', audioChunksRef.current.length, 'Size:', blob.size);
 
-          console.log('Recording stopped. Chunks:', audioChunksRef.current.length, 'Size:', blob.size);
+        // Cleanup stream
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(track => track.stop());
+          streamRef.current = null;
+        }
 
-          // Cleanup stream
-          if (streamRef.current) {
-            streamRef.current.getTracks().forEach(track => track.stop());
-            streamRef.current = null;
-          }
+        // Stop duration tracking
+        if (durationIntervalRef.current) {
+          clearInterval(durationIntervalRef.current);
+          durationIntervalRef.current = null;
+        }
 
-          // Stop duration tracking
-          if (durationIntervalRef.current) {
-            clearInterval(durationIntervalRef.current);
-            durationIntervalRef.current = null;
-          }
+        setIsRecording(false);
+        setAudioBlob(blob);
 
-          setIsRecording(false);
-          setAudioBlob(blob);
+        if (blob.size > 0) {
+          resolve(blob);
+        } else {
+          reject(new Error('No audio data captured'));
+        }
+      };
 
-          if (blob.size > 0) {
-            resolve(blob);
-          } else {
-            reject(new Error('No audio data captured'));
-          }
-        };
-
-        // Stop recording
-        mediaRecorder.stop();
-      }, 100);
+      // Stop recording - this triggers ondataavailable then onstop
+      mediaRecorder.stop();
     });
   }, []);
 
