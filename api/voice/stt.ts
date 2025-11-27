@@ -33,6 +33,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Audio data is required' });
     }
 
+    // Debug: Log first 20 chars of received base64
+    const base64Preview = typeof audio === 'string' ? audio.substring(0, 20) : 'not-a-string';
+
     // Decode base64 audio
     const audioBuffer = Buffer.from(audio, 'base64');
     const startTime = Date.now();
@@ -40,6 +43,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.log('STT request received:', {
       size: audioBuffer.length,
       mimeType: mimeType || 'audio/webm',
+      base64Preview: base64Preview,
+      audioType: typeof audio,
     });
 
     if (audioBuffer.length < 1000) {

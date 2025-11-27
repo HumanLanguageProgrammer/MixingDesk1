@@ -27,10 +27,14 @@ export async function speechToText(audioBlob: Blob): Promise<STTResponse> {
   // Convert blob to base64 for reliable serverless transmission
   const audioBase64 = await blobToBase64(audioBlob);
 
+  // Debug: Check first few chars of base64 (valid webm should start with "GkXf" or similar)
+  const base64Preview = audioBase64.substring(0, 20);
+
   console.log('Sending audio to STT:', {
     originalSize: audioBlob.size,
     base64Length: audioBase64.length,
     mimeType: audioBlob.type,
+    base64Preview: base64Preview,
   });
 
   const response = await fetch('/api/voice/stt', {
