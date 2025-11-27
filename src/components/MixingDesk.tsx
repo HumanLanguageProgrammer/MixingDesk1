@@ -253,8 +253,8 @@ export function MixingDesk() {
           <div className="flex items-center gap-4">
             <h1 className="text-xl font-semibold text-gray-100">
               Mixing Desk
-              <span className="ml-2 text-sm font-normal text-gray-400">
-                Operation Basecamp • Phase C
+              <span className="ml-2 text-sm font-normal text-blue-400">
+                Operation Basecamp • Phase C • v1.1
               </span>
               {agentOS && (
                 <span className="ml-2 text-xs font-normal text-green-400">
