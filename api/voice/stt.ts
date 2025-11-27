@@ -3,7 +3,8 @@
 // Clean architecture: Whisper for transcription, Hume for TTS expression
 
 import { VercelRequest, VercelResponse } from '@vercel/node';
-import OpenAI, { toFile } from 'openai';
+import OpenAI from 'openai';
+import { File } from 'buffer';
 
 interface STTResponse {
   text: string;
@@ -74,10 +75,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       apiKey: openaiApiKey,
     });
 
-    // Create a File object from the buffer using OpenAI's toFile helper
-    // Convert Buffer to Uint8Array for proper type compatibility
-    const uint8Array = new Uint8Array(audioBuffer.buffer, audioBuffer.byteOffset, audioBuffer.byteLength);
-    const file = await toFile(uint8Array, filename, { type: cleanMimeType });
+    // Create a File object using Node.js native File class
+    const file = new File([audioBuffer], filename, { type: cleanMimeType });
 
     // Call Whisper API using the official SDK
     const transcription = await openai.audio.transcriptions.create({
