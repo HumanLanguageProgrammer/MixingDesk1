@@ -67,7 +67,8 @@ export function useVoiceRecorder({
       };
 
       mediaRecorderRef.current = mediaRecorder;
-      mediaRecorder.start(100); // Collect data every 100ms
+      // Start WITHOUT timeslice to get complete WebM with proper header
+      mediaRecorder.start();
       setIsRecording(true);
 
       console.log('Recording started with mimeType:', mimeType);

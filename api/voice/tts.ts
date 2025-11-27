@@ -94,31 +94,55 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     // Call Hume TTS API
-    // Using the EVI (Empathic Voice Interface) TTS endpoint
-    const humeResponse = await fetch('https://api.hume.ai/v0/tts', {
+    // Voice is specified inside the first utterance (by id or name)
+    // See: https://dev.hume.ai/docs/text-to-speech-tts/voices
+    const utterance: Record<string, unknown> = {
+      text: text,
+      description: `Speak with a ${emotional_delivery?.tone || 'warm'} tone`,
+    };
+
+    // Add voice specification if voice ID is provided
+    if (humeVoiceId) {
+      utterance.voice = {
+        id: humeVoiceId,
+      };
+    }
+
+    const requestBody = {
+      utterances: [utterance],
+      format: {
+        type: 'mp3',
+      },
+    };
+
+    console.log('Calling Hume TTS API:', {
+      url: 'https://api.hume.ai/v0/tts/file',
+      textLength: text.length,
+      voiceId: humeVoiceId,
+      requestBody: JSON.stringify(requestBody),
+    });
+
+    const humeResponse = await fetch('https://api.hume.ai/v0/tts/file', {
       method: 'POST',
       headers: {
         'X-Hume-Api-Key': humeApiKey,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        text,
-        voice: {
-          id: humeVoiceId,
-        },
-        ...humeParams.voice_settings,
-      }),
+      body: JSON.stringify(requestBody),
     });
+
+    console.log('Hume TTS response status:', humeResponse.status);
 
     if (!humeResponse.ok) {
       const errorText = await humeResponse.text();
-      console.error('Hume TTS error:', errorText);
+      console.error('Hume TTS error:', humeResponse.status, errorText);
 
       // Fallback: return a simple response indicating TTS failed
       // The client can show text-only in this case
       return res.status(500).json({
         error: 'TTS processing failed',
         details: errorText,
+        status: humeResponse.status,
         fallback: true
       });
     }

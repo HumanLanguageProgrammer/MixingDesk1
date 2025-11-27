@@ -1,7 +1,7 @@
 // src/components/VoiceButton.tsx
-// Push-to-talk voice recording button
+// Click-to-toggle voice recording button
 
-import { useCallback, useRef, useEffect } from 'react';
+import { useCallback, useRef } from 'react';
 
 interface VoiceButtonProps {
   isRecording: boolean;
@@ -21,66 +21,17 @@ export function VoiceButton({
   onStopRecording,
 }: VoiceButtonProps) {
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const isHoldingRef = useRef(false);
 
-  // Handle mouse/touch down - start recording
-  const handlePressStart = useCallback((e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault();
+  // Handle click - toggle recording
+  const handleClick = useCallback(() => {
     if (isDisabled || isProcessing) return;
 
-    isHoldingRef.current = true;
-    onStartRecording();
-  }, [isDisabled, isProcessing, onStartRecording]);
-
-  // Handle mouse/touch up - stop recording
-  const handlePressEnd = useCallback((e: React.MouseEvent | React.TouchEvent) => {
-    e.preventDefault();
-    if (!isHoldingRef.current) return;
-
-    isHoldingRef.current = false;
     if (isRecording) {
       onStopRecording();
+    } else {
+      onStartRecording();
     }
-  }, [isRecording, onStopRecording]);
-
-  // Handle mouse leaving the button while recording
-  const handleLeave = useCallback(() => {
-    if (isHoldingRef.current && isRecording) {
-      isHoldingRef.current = false;
-      onStopRecording();
-    }
-  }, [isRecording, onStopRecording]);
-
-  // Keyboard support (space bar)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && document.activeElement === buttonRef.current) {
-        e.preventDefault();
-        if (!isHoldingRef.current && !isDisabled && !isProcessing) {
-          isHoldingRef.current = true;
-          onStartRecording();
-        }
-      }
-    };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.code === 'Space' && isHoldingRef.current) {
-        e.preventDefault();
-        isHoldingRef.current = false;
-        if (isRecording) {
-          onStopRecording();
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, [isRecording, isDisabled, isProcessing, onStartRecording, onStopRecording]);
+  }, [isDisabled, isProcessing, isRecording, onStartRecording, onStopRecording]);
 
   // Format duration as mm:ss
   const formatDuration = (seconds: number): string => {
@@ -93,16 +44,12 @@ export function VoiceButton({
     <button
       ref={buttonRef}
       type="button"
-      onMouseDown={handlePressStart}
-      onMouseUp={handlePressEnd}
-      onMouseLeave={handleLeave}
-      onTouchStart={handlePressStart}
-      onTouchEnd={handlePressEnd}
+      onClick={handleClick}
       disabled={isDisabled || isProcessing}
       className={`
         relative flex items-center justify-center gap-2
         px-4 py-3 rounded-lg font-medium transition-all
-        select-none touch-none
+        select-none
         ${isRecording
           ? 'bg-red-600 text-white scale-105 shadow-lg shadow-red-500/30'
           : isProcessing
@@ -112,7 +59,7 @@ export function VoiceButton({
               : 'bg-blue-600 hover:bg-blue-500 text-white active:scale-95'
         }
       `}
-      aria-label={isRecording ? 'Recording... release to stop' : 'Hold to speak'}
+      aria-label={isRecording ? 'Click to stop recording' : 'Click to start recording'}
     >
       {/* Microphone icon */}
       <MicrophoneIcon isRecording={isRecording} isProcessing={isProcessing} />
@@ -123,7 +70,7 @@ export function VoiceButton({
           ? formatDuration(duration)
           : isProcessing
             ? 'Processing...'
-            : 'Hold to speak'
+            : 'Click to speak'
         }
       </span>
 
