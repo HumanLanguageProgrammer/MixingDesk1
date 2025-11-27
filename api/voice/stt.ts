@@ -1,129 +1,140 @@
 // api/voice/stt.ts
-// Vercel Serverless Function for Speech-to-Text using OpenAI Whisper
+// Vercel Serverless Function - Speech-to-Text using OpenAI Whisper API
+// Clean architecture: Whisper for transcription, Hume for TTS expression
 
-import type { VercelRequest, VercelResponse } from '@vercel/node';
+import { VercelRequest, VercelResponse } from '@vercel/node';
 import OpenAI, { toFile } from 'openai';
 
+interface STTResponse {
+  text: string;
+  confidence: number;
+  duration_ms: number;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // CORS headers
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-
-  // Handle preflight
-  if (req.method === 'OPTIONS') {
-    return res.status(200).end();
-  }
-
-  // Only allow POST
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const openaiApiKey = process.env.OPENAI_API_KEY;
+
+  if (!openaiApiKey) {
+    console.error('Missing OPENAI_API_KEY');
+    return res.status(500).json({
+      error: 'Server configuration error',
+      details: 'OPENAI_API_KEY not configured. Please add your OpenAI API key to enable voice transcription.'
+    });
   }
 
   try {
     const { audio, mimeType } = req.body;
 
     if (!audio) {
-      return res.status(400).json({ error: 'No audio data provided' });
+      return res.status(400).json({ error: 'Audio data is required' });
     }
 
-    // Validate OpenAI API key
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      console.error('OPENAI_API_KEY not configured');
-      return res.status(500).json({ error: 'Server configuration error: Missing API key' });
-    }
-
-    // Decode base64 audio to Buffer
+    // Decode base64 audio
     const audioBuffer = Buffer.from(audio, 'base64');
+    const startTime = Date.now();
 
-    console.log('STT Request:', {
-      mimeType,
-      bufferSize: audioBuffer.length,
+    console.log('STT request received:', {
+      size: audioBuffer.length,
+      mimeType: mimeType || 'audio/webm',
     });
 
-    // Validate buffer size (minimum for valid audio)
-    if (audioBuffer.length < 100) {
+    if (audioBuffer.length < 1000) {
       return res.status(400).json({
-        error: 'Audio data too small. Please record for longer.',
-        details: `Received ${audioBuffer.length} bytes`
+        error: 'Audio too short',
+        details: 'Please record for at least 1 second'
       });
     }
 
     // Determine file extension from mime type
-    const extension = getExtensionFromMimeType(mimeType || 'audio/webm');
+    const extensionMap: Record<string, string> = {
+      'audio/webm': 'webm',
+      'audio/webm;codecs=opus': 'webm',
+      'audio/ogg': 'ogg',
+      'audio/ogg;codecs=opus': 'ogg',
+      'audio/mp4': 'mp4',
+      'audio/mpeg': 'mp3',
+      'audio/wav': 'wav',
+    };
+    const cleanMimeType = (mimeType || 'audio/webm').split(';')[0];
+    const extension = extensionMap[mimeType || 'audio/webm'] || extensionMap[cleanMimeType] || 'webm';
     const filename = `audio.${extension}`;
 
+    console.log('Sending to Whisper API:', {
+      filename,
+      contentType: cleanMimeType,
+      bufferSize: audioBuffer.length,
+    });
+
     // Initialize OpenAI client
-    const openai = new OpenAI({ apiKey });
-
-    // Convert buffer to a File object using OpenAI's toFile helper
-    const audioFile = await toFile(audioBuffer, filename, {
-      type: mimeType || 'audio/webm',
+    const openai = new OpenAI({
+      apiKey: openaiApiKey,
     });
 
-    // Call Whisper API
+    // Create a File object using OpenAI's toFile helper (works across Node.js versions)
+    const file = await toFile(audioBuffer, filename, { type: cleanMimeType });
+
+    // Call Whisper API using the official SDK
     const transcription = await openai.audio.transcriptions.create({
-      file: audioFile,
+      file,
       model: 'whisper-1',
-      language: 'en',
     });
 
-    console.log('Transcription successful:', {
-      textLength: transcription.text?.length,
-      preview: transcription.text?.substring(0, 50),
+    const processingTime = Date.now() - startTime;
+
+    console.log('Whisper transcription complete:', {
+      text: transcription.text?.substring(0, 50) + '...',
+      processingTime: `${processingTime}ms`
     });
 
-    return res.status(200).json({
-      text: transcription.text,
-      success: true,
-    });
+    // Build response
+    const response: STTResponse = {
+      text: transcription.text || '',
+      confidence: 0.95, // Whisper doesn't provide confidence scores, using high default
+      duration_ms: processingTime,
+    };
+
+    // Return empty text handling
+    if (!response.text.trim()) {
+      return res.status(200).json({
+        ...response,
+        text: '',
+        confidence: 0,
+      });
+    }
+
+    return res.status(200).json(response);
 
   } catch (error) {
     console.error('STT error:', error);
 
-    // Handle OpenAI-specific errors
+    // Handle OpenAI API errors
     if (error instanceof OpenAI.APIError) {
-      const status = error.status || 500;
-      const message = error.message || 'OpenAI API error';
-
-      // Check for specific error types
-      if (message.includes('Invalid file format') || message.includes('audio')) {
-        return res.status(400).json({
-          error: 'The audio format may not be supported. Try recording again.',
-          details: message,
+      if (error.status === 401) {
+        return res.status(500).json({
+          error: 'Authentication failed',
+          details: 'Invalid OpenAI API key. Please check your OPENAI_API_KEY configuration.'
         });
       }
-
-      return res.status(status).json({
-        error: message,
-        details: `OpenAI error code: ${error.code}`,
+      if (error.status === 400) {
+        return res.status(400).json({
+          error: 'Invalid audio',
+          details: 'The audio format may not be supported. Try recording again.',
+          debug: error.message
+        });
+      }
+      return res.status(500).json({
+        error: 'Transcription failed',
+        details: error.message
       });
     }
 
     return res.status(500).json({
       error: 'Internal server error',
-      details: error instanceof Error ? error.message : 'Unknown error',
+      details: error instanceof Error ? error.message : 'Unknown error'
     });
   }
-}
-
-function getExtensionFromMimeType(mimeType: string): string {
-  // Map common audio mime types to file extensions
-  // OpenAI supports: mp3, mp4, mpeg, mpga, m4a, wav, webm
-  const mimeMap: Record<string, string> = {
-    'audio/webm': 'webm',
-    'audio/webm;codecs=opus': 'webm',
-    'audio/mp3': 'mp3',
-    'audio/mpeg': 'mp3',
-    'audio/mp4': 'mp4',
-    'audio/m4a': 'm4a',
-    'audio/wav': 'wav',
-    'audio/wave': 'wav',
-    'audio/x-wav': 'wav',
-    'audio/ogg': 'ogg',
-    'audio/ogg;codecs=opus': 'ogg',
-  };
-
-  return mimeMap[mimeType] || 'webm';
 }
