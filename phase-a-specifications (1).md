@@ -44,90 +44,58 @@ Direct browser-to-Supabase connection.
 
 ---
 
-## Supabase Configuration (Already Exists)
+## Supabase Configuration (Verified)
 
 ```yaml
 Project: Operation Basecamp
 URL: https://evtrcspwpxnygvjfpbng.supabase.co
 
 Database Tables:
-  - sessions (session tracking)
-  - messages (conversation persistence)  
-  - library_items (text content with metadata)
+  
+  library_items (verified schema):
+    - id: uuid (PK)
+    - title: text
+    - content: text
+    - content_type: text (NOTE: not 'item_type')
+    - complexity: text ('simple' | 'intermediate' | 'advanced')
+    - topics: text[]
+    - tags: text[]
+    - retrieval_count: integer
+    - last_retrieved_at: timestamp (nullable)
+    - created_at: timestamp
+    - updated_at: timestamp
+  
+  sessions (for Phase B):
+    - id: uuid (PK)
+    - session_identifier: text (unique)
+    - visitor_context: jsonb
+    - started_at: timestamp
+    - last_active_at: timestamp
+    - status: text ('active' | 'completed' | 'abandoned')
+    - created_at: timestamp
+    - updated_at: timestamp
+  
+  messages (for Phase B):
+    - id: uuid (PK)
+    - session_id: uuid (FK -> sessions)
+    - speaker: text ('visitor' | 'agent')
+    - content: text
+    - message_type: text ('text' | 'voice' | 'system')
+    - sequence_number: integer
+    - tokens_used: integer (nullable)
+    - created_at: timestamp
 
 Storage Bucket:
   - test-images (public read access)
   - Contains: "LLMs for Business v3.jpg"
 
+RLS Policies:
+  - Anon SELECT on library_items: enabled
+  - Public read on test-images: enabled
+
 Environment Variables Needed:
   VITE_SUPABASE_URL=https://evtrcspwpxnygvjfpbng.supabase.co
   VITE_SUPABASE_ANON_KEY=[anon key from Supabase dashboard]
-```
-
----
-
-## Database Schemas (Actual)
-
-### sessions table
-
-```sql
-create table public.sessions (
-  id uuid not null default extensions.uuid_generate_v4 (),
-  session_identifier text not null,
-  visitor_context jsonb null,
-  started_at timestamp with time zone null default now(),
-  last_active_at timestamp with time zone null default now(),
-  status text null default 'active'::text,
-  created_at timestamp with time zone null default now(),
-  updated_at timestamp with time zone null default now(),
-  constraint sessions_pkey primary key (id),
-  constraint sessions_session_identifier_key unique (session_identifier),
-  constraint sessions_status_check check (
-    (status = any (array['active'::text, 'completed'::text, 'abandoned'::text]))
-  )
-);
-
-create index idx_sessions_identifier on public.sessions using btree (session_identifier);
-create index idx_sessions_status on public.sessions using btree (status);
-```
-
-### messages table
-
-```sql
-create table public.messages (
-  id uuid not null default extensions.uuid_generate_v4 (),
-  session_id uuid null,
-  speaker text not null,
-  content text not null,
-  message_type text null default 'text'::text,
-  sequence_number integer not null,
-  tokens_used integer null,
-  created_at timestamp with time zone null default now(),
-  constraint messages_pkey primary key (id),
-  constraint messages_session_id_sequence_number_key unique (session_id, sequence_number),
-  constraint messages_session_id_fkey foreign key (session_id) references sessions (id) on delete cascade,
-  constraint messages_message_type_check check (
-    (message_type = any (array['text'::text, 'voice'::text, 'system'::text]))
-  ),
-  constraint messages_speaker_check check (
-    (speaker = any (array['visitor'::text, 'agent'::text]))
-  )
-);
-
-create index idx_messages_session on public.messages using btree (session_id, sequence_number);
-create index idx_messages_created on public.messages using btree (created_at desc);
-```
-
-### library_items table
-
-```sql
--- Columns: id, title, content, content_type, tags, topics, complexity,
---          retrieval_count, last_retrieved_at, created_at, updated_at
-
--- Sample data exists:
--- - "Mixing Desk UI Components" (simple)
--- - "Testing Agent Architecture" (intermediate)
--- - "Platform Validation Overview" (simple)
 ```
 
 ---
@@ -171,15 +139,27 @@ mixing-desk/
 ```typescript
 // src/types/index.ts
 
-// ============================================
-// Local UI State (Phase A - not persisted)
-// ============================================
-
+// Local UI State (Phase A)
 export interface Message {
   id: string;
   speaker: 'visitor' | 'agent';
   content: string;
   timestamp: Date;
+}
+
+// Database Record (matches actual Supabase schema)
+export interface LibraryItem {
+  id: string;
+  title: string;
+  content: string;
+  content_type: string;  // Note: 'content_type' not 'item_type'
+  complexity: 'simple' | 'intermediate' | 'advanced';
+  topics: string[];
+  tags: string[];
+  retrieval_count: number;
+  last_retrieved_at: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ImageAsset {
@@ -200,25 +180,7 @@ export interface MixingDeskState {
   isLoading: boolean;
 }
 
-// ============================================
-// Database Records (matches Supabase schema)
-// ============================================
-
-export interface LibraryItem {
-  id: string;
-  title: string;
-  content: string;
-  content_type: string;  // e.g., 'reference'
-  complexity: 'simple' | 'intermediate' | 'advanced';
-  topics: string[];
-  tags: string[];
-  retrieval_count: number;
-  last_retrieved_at: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-// For Phase B - database persistence
+// For Phase B (documented here for reference)
 export interface SessionRecord {
   id: string;
   session_identifier: string;
@@ -230,7 +192,6 @@ export interface SessionRecord {
   updated_at: string;
 }
 
-// For Phase B - database persistence
 export interface MessageRecord {
   id: string;
   session_id: string | null;
@@ -833,15 +794,18 @@ export function StatusIndicator({ status, isLoading }: StatusIndicatorProps) {
     );
   }
 
+  const allConnected = status.database === 'connected' && status.storage === 'connected';
+  const hasError = status.database === 'error' || status.storage === 'error';
+
   return (
     <div className="flex items-center gap-4">
-      <StatusDot
-        label="Database"
-        status={status.database}
+      <StatusDot 
+        label="Database" 
+        status={status.database} 
       />
-      <StatusDot
-        label="Storage"
-        status={status.storage}
+      <StatusDot 
+        label="Storage" 
+        status={status.storage} 
       />
     </div>
   );
@@ -1223,19 +1187,36 @@ The UI substrate built in Phase A will remain largely unchanged - we're just add
 ```yaml
 Document: phase-a-specifications.md
 Type: Technical Specification for Claude Code
-Version: 1.0
+Version: 1.1 (Updated with verified schemas)
 Created: November 26, 2025
+Updated: November 26, 2025
+
+Status: PHASE A COMPLETE ✅
+  Live URL: https://mixing-desk1-pkb9.vercel.app/
+  All capabilities validated
+
+Updates in v1.1:
+  - Corrected LibraryItem interface (content_type not item_type)
+  - Added full schema documentation for all tables
+  - Added SessionRecord and MessageRecord types for Phase B reference
+  - Documented RLS policies
+  - Marked as complete with live URL
 
 Purpose:
   Complete specifications for Phase A implementation
   Claude Code can execute without ambiguity
   Production-ready React + Supabase application
 
-Target:
-  Functional Mixing Desk UI
-  Direct Supabase connection
-  Deployed to Vercel
-  Ready for Phase B intelligence layer
+Validated Capabilities:
+  ✓ React app deployed to Vercel
+  ✓ Supabase database connection working
+  ✓ Supabase storage connection working
+  ✓ Test image displays from storage
+  ✓ Library items query and display
+  ✓ Conversation UI functional (local state)
+
+Next Phase:
+  Phase B - LLM Integration (see phase-b-specifications.md)
 
 For:
   Claude Code (implementation)
