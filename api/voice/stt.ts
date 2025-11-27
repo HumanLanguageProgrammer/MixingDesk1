@@ -113,6 +113,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Handle OpenAI API errors
     if (error instanceof OpenAI.APIError) {
+      console.error('OpenAI API Error details:', {
+        status: error.status,
+        message: error.message,
+        code: error.code,
+        type: error.type,
+      });
+
       if (error.status === 401) {
         return res.status(500).json({
           error: 'Authentication failed',
@@ -122,8 +129,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (error.status === 400) {
         return res.status(400).json({
           error: 'Invalid audio',
-          details: 'The audio format may not be supported. Try recording again.',
-          debug: error.message
+          details: `OpenAI error: ${error.message}`,
+          openai_code: error.code,
+          openai_type: error.type,
         });
       }
       return res.status(500).json({

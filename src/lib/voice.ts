@@ -44,6 +44,7 @@ export async function speechToText(audioBlob: Blob): Promise<STTResponse> {
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: 'STT processing failed' }));
+    console.error('STT API error response:', error);
     throw new Error(error.details || error.error || 'STT processing failed');
   }
 
