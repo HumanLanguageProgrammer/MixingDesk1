@@ -4,6 +4,14 @@
 import type { STTResponse, EmotionalDelivery } from '../types';
 
 /**
+ * Convert blob to Uint8Array for debugging
+ */
+async function blobToBytes(blob: Blob): Promise<Uint8Array> {
+  const arrayBuffer = await blob.arrayBuffer();
+  return new Uint8Array(arrayBuffer);
+}
+
+/**
  * Convert blob to base64
  */
 async function blobToBase64(blob: Blob): Promise<string> {
@@ -24,6 +32,21 @@ async function blobToBase64(blob: Blob): Promise<string> {
  * Send audio for speech-to-text processing with emotion detection
  */
 export async function speechToText(audioBlob: Blob): Promise<STTResponse> {
+  // Debug: Check raw bytes of the audio blob BEFORE base64 conversion
+  const rawBytes = await blobToBytes(audioBlob);
+  const magicBytesHex = Array.from(rawBytes.slice(0, 4))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+  const isValidWebm = magicBytesHex === '1a45dfa3';
+
+  console.log('Raw audio blob check:', {
+    size: audioBlob.size,
+    mimeType: audioBlob.type,
+    magicBytesHex,
+    isValidWebm,
+    firstBytes: Array.from(rawBytes.slice(0, 8)),
+  });
+
   // Convert blob to base64 for reliable serverless transmission
   const audioBase64 = await blobToBase64(audioBlob);
 
