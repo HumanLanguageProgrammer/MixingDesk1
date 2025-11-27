@@ -3,53 +3,12 @@
 // Clean architecture: Whisper for transcription, Hume for TTS expression
 
 import { VercelRequest, VercelResponse } from '@vercel/node';
+import OpenAI, { toFile } from 'openai';
 
 interface STTResponse {
   text: string;
   confidence: number;
   duration_ms: number;
-}
-
-// Build multipart form data manually for reliable Node.js compatibility
-function buildMultipartFormData(
-  audioBuffer: Buffer,
-  filename: string,
-  mimeType: string
-): { body: Buffer; boundary: string } {
-  const boundary = '----WebKitFormBoundary' + Math.random().toString(36).substring(2);
-
-  const parts: Buffer[] = [];
-
-  // File part
-  parts.push(Buffer.from(
-    `--${boundary}\r\n` +
-    `Content-Disposition: form-data; name="file"; filename="${filename}"\r\n` +
-    `Content-Type: ${mimeType}\r\n\r\n`
-  ));
-  parts.push(audioBuffer);
-  parts.push(Buffer.from('\r\n'));
-
-  // Model part
-  parts.push(Buffer.from(
-    `--${boundary}\r\n` +
-    `Content-Disposition: form-data; name="model"\r\n\r\n` +
-    `whisper-1\r\n`
-  ));
-
-  // Response format part
-  parts.push(Buffer.from(
-    `--${boundary}\r\n` +
-    `Content-Disposition: form-data; name="response_format"\r\n\r\n` +
-    `verbose_json\r\n`
-  ));
-
-  // Final boundary
-  parts.push(Buffer.from(`--${boundary}--\r\n`));
-
-  return {
-    body: Buffer.concat(parts),
-    boundary,
-  };
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -104,73 +63,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const extension = extensionMap[mimeType || 'audio/webm'] || extensionMap[cleanMimeType] || 'webm';
     const filename = `audio.${extension}`;
 
-    // Build multipart form data
-    const { body, boundary } = buildMultipartFormData(
-      audioBuffer,
-      filename,
-      cleanMimeType
-    );
-
     console.log('Sending to Whisper API:', {
       filename,
       contentType: cleanMimeType,
-      bodySize: body.length,
+      bufferSize: audioBuffer.length,
     });
 
-    // Call OpenAI Whisper API
-    // Convert Buffer to Uint8Array for fetch compatibility
-    const bodyArray = new Uint8Array(body.buffer, body.byteOffset, body.byteLength);
-    const whisperResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${openaiApiKey}`,
-        'Content-Type': `multipart/form-data; boundary=${boundary}`,
-      },
-      body: bodyArray,
+    // Initialize OpenAI client
+    const openai = new OpenAI({
+      apiKey: openaiApiKey,
     });
 
-    if (!whisperResponse.ok) {
-      const errorText = await whisperResponse.text();
-      console.error('Whisper API error:', whisperResponse.status, errorText);
+    // Create a File object from the buffer using OpenAI's toFile helper
+    const file = await toFile(audioBuffer, filename, { type: cleanMimeType });
 
-      // Provide helpful error messages
-      if (whisperResponse.status === 401) {
-        return res.status(500).json({
-          error: 'Authentication failed',
-          details: 'Invalid OpenAI API key. Please check your OPENAI_API_KEY configuration.'
-        });
-      }
+    // Call Whisper API using the official SDK
+    const transcription = await openai.audio.transcriptions.create({
+      file,
+      model: 'whisper-1',
+      response_format: 'verbose_json',
+    });
 
-      if (whisperResponse.status === 400) {
-        // Log the actual error for debugging
-        console.error('Whisper 400 error details:', errorText);
-        return res.status(400).json({
-          error: 'Invalid audio',
-          details: 'The audio format may not be supported. Try recording again.',
-          debug: errorText
-        });
-      }
-
-      return res.status(500).json({
-        error: 'Transcription failed',
-        details: errorText
-      });
-    }
-
-    const whisperResult = await whisperResponse.json();
     const processingTime = Date.now() - startTime;
 
     console.log('Whisper transcription complete:', {
-      text: whisperResult.text?.substring(0, 50) + '...',
-      duration: whisperResult.duration,
+      text: transcription.text?.substring(0, 50) + '...',
+      duration: transcription.duration,
       processingTime: `${processingTime}ms`
     });
 
     // Build response
     const response: STTResponse = {
-      text: whisperResult.text || '',
+      text: transcription.text || '',
       confidence: 0.95, // Whisper doesn't provide confidence scores, using high default
-      duration_ms: Math.round((whisperResult.duration || 0) * 1000),
+      duration_ms: Math.round((transcription.duration || 0) * 1000),
     };
 
     // Return empty text handling
@@ -186,6 +112,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   } catch (error) {
     console.error('STT error:', error);
+
+    // Handle OpenAI API errors
+    if (error instanceof OpenAI.APIError) {
+      if (error.status === 401) {
+        return res.status(500).json({
+          error: 'Authentication failed',
+          details: 'Invalid OpenAI API key. Please check your OPENAI_API_KEY configuration.'
+        });
+      }
+      if (error.status === 400) {
+        return res.status(400).json({
+          error: 'Invalid audio',
+          details: 'The audio format may not be supported. Try recording again.',
+          debug: error.message
+        });
+      }
+      return res.status(500).json({
+        error: 'Transcription failed',
+        details: error.message
+      });
+    }
+
     return res.status(500).json({
       error: 'Internal server error',
       details: error instanceof Error ? error.message : 'Unknown error'
