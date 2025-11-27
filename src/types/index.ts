@@ -151,13 +151,15 @@ export interface ProsodyAnalysis {
   volume: 'quiet' | 'normal' | 'loud';
 }
 
-// STT Response
+// STT Response (simplified - Whisper provides transcription only)
+// Emotion analysis is optional and only present if using an emotion-aware STT service
 export interface STTResponse {
   text: string;
-  emotions: EmotionAnalysis;
-  prosody: ProsodyAnalysis;
   confidence: number;
   duration_ms: number;
+  // Optional - not provided by Whisper, only by emotion-aware services
+  emotions?: EmotionAnalysis;
+  prosody?: ProsodyAnalysis;
 }
 
 // Emotional delivery (agent's chosen voice expression)

@@ -123,8 +123,9 @@ export function useVoice(): UseVoiceReturn {
 
       // Store results
       setLastTranscription(sttResult.text);
-      setLastEmotions(sttResult.emotions);
-      setLastProsody(sttResult.prosody);
+      // Emotions and prosody are optional (not provided by Whisper)
+      setLastEmotions(sttResult.emotions || null);
+      setLastProsody(sttResult.prosody || null);
 
       return sttResult;
 
