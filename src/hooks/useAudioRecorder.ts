@@ -77,8 +77,10 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         console.error('MediaRecorder error:', event);
       };
 
-      // Start recording
-      mediaRecorder.start(100); // Collect in 100ms chunks
+      // Start recording WITHOUT timeslice to get a complete WebM file
+      // Using timeslice can cause the header to be in a separate chunk
+      // which may get lost or cause issues with reassembly
+      mediaRecorder.start();
       setIsRecording(true);
 
       // Track duration
@@ -111,47 +113,49 @@ export function useAudioRecorder(): UseAudioRecorderReturn {
         return;
       }
 
-      const mimeType = mediaRecorder.mimeType;
-
-      // Request final data before stopping
-      if (mediaRecorder.state === 'recording') {
-        mediaRecorder.requestData();
+      // Check minimum recording duration (500ms)
+      const recordingDuration = Date.now() - startTimeRef.current;
+      if (recordingDuration < 500) {
+        console.warn('Recording too short:', recordingDuration, 'ms');
+        // Still stop the recorder but warn
       }
 
-      // Small delay to ensure final chunk is captured
-      setTimeout(() => {
-        // Set up the stop handler
-        mediaRecorder.onstop = () => {
-          // Create blob from all collected chunks
-          const blob = new Blob(audioChunksRef.current, { type: mimeType });
+      const mimeType = mediaRecorder.mimeType;
 
-          console.log('Recording stopped. Chunks:', audioChunksRef.current.length, 'Size:', blob.size);
+      // Set up the stop handler - all data comes in ondataavailable before onstop
+      mediaRecorder.onstop = () => {
+        // Create blob from all collected chunks
+        const blob = new Blob(audioChunksRef.current, { type: mimeType });
 
-          // Cleanup stream
-          if (streamRef.current) {
-            streamRef.current.getTracks().forEach(track => track.stop());
-            streamRef.current = null;
-          }
+        console.log('Recording stopped. Chunks:', audioChunksRef.current.length, 'Size:', blob.size, 'Duration:', recordingDuration, 'ms');
 
-          // Stop duration tracking
-          if (durationIntervalRef.current) {
-            clearInterval(durationIntervalRef.current);
-            durationIntervalRef.current = null;
-          }
+        // Cleanup stream
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(track => track.stop());
+          streamRef.current = null;
+        }
 
-          setIsRecording(false);
-          setAudioBlob(blob);
+        // Stop duration tracking
+        if (durationIntervalRef.current) {
+          clearInterval(durationIntervalRef.current);
+          durationIntervalRef.current = null;
+        }
 
-          if (blob.size > 0) {
-            resolve(blob);
-          } else {
-            reject(new Error('No audio data captured'));
-          }
-        };
+        setIsRecording(false);
+        setAudioBlob(blob);
 
-        // Stop recording
-        mediaRecorder.stop();
-      }, 100);
+        // Check for minimum viable recording size (at least 1KB)
+        if (blob.size < 1000) {
+          reject(new Error('Recording too short. Please hold the button and speak for at least 1 second.'));
+        } else if (blob.size > 0) {
+          resolve(blob);
+        } else {
+          reject(new Error('No audio data captured'));
+        }
+      };
+
+      // Stop recording - this triggers ondataavailable then onstop
+      mediaRecorder.stop();
     });
   }, []);
 

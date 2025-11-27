@@ -33,6 +33,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Audio data is required' });
     }
 
+    // Debug: Log first 20 chars of received base64
+    const base64Preview = typeof audio === 'string' ? audio.substring(0, 20) : 'not-a-string';
+
     // Decode base64 audio
     const audioBuffer = Buffer.from(audio, 'base64');
     const startTime = Date.now();
@@ -40,6 +43,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.log('STT request received:', {
       size: audioBuffer.length,
       mimeType: mimeType || 'audio/webm',
+      base64Preview: base64Preview,
+      audioType: typeof audio,
     });
 
     if (audioBuffer.length < 1000) {
@@ -63,10 +68,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const extension = extensionMap[mimeType || 'audio/webm'] || extensionMap[cleanMimeType] || 'webm';
     const filename = `audio.${extension}`;
 
+    // Check if the buffer looks like a valid webm file (EBML header: 1A 45 DF A3)
+    const magicBytes = audioBuffer.slice(0, 4).toString('hex');
+    const isValidWebm = magicBytes === '1a45dfa3';
+
     console.log('Sending to Whisper API:', {
       filename,
       contentType: cleanMimeType,
       bufferSize: audioBuffer.length,
+      magicBytes,
+      isValidWebm,
     });
 
     // Initialize OpenAI client
@@ -74,8 +85,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       apiKey: openaiApiKey,
     });
 
-    // Create a File object using OpenAI's toFile helper (works across Node.js versions)
-    const file = await toFile(audioBuffer, filename, { type: cleanMimeType });
+    // Create file using toFile with explicit Uint8Array conversion
+    // This ensures proper binary handling across Node.js versions
+    const file = await toFile(
+      new Uint8Array(audioBuffer.buffer, audioBuffer.byteOffset, audioBuffer.length),
+      filename,
+      { type: cleanMimeType }
+    );
 
     // Call Whisper API using the official SDK
     const transcription = await openai.audio.transcriptions.create({
@@ -113,6 +129,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Handle OpenAI API errors
     if (error instanceof OpenAI.APIError) {
+      console.error('OpenAI API Error details:', {
+        status: error.status,
+        message: error.message,
+        code: error.code,
+        type: error.type,
+      });
+
       if (error.status === 401) {
         return res.status(500).json({
           error: 'Authentication failed',
@@ -122,8 +145,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (error.status === 400) {
         return res.status(400).json({
           error: 'Invalid audio',
-          details: 'The audio format may not be supported. Try recording again.',
-          debug: error.message
+          details: `OpenAI error: ${error.message}`,
+          openai_code: error.code,
+          openai_type: error.type,
         });
       }
       return res.status(500).json({

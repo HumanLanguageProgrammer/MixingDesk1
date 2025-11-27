@@ -138,6 +138,7 @@ export function MixingDesk() {
 
   // Handle visitor message submission (text only)
   async function handleSendMessage(content: string) {
+    console.log('handleSendMessage called with:', JSON.stringify(content));
     await sendMessageToAgent(content);
   }
 
@@ -147,12 +148,17 @@ export function MixingDesk() {
     emotions: EmotionAnalysis,
     prosody: ProsodyAnalysis
   ) {
+    console.log('handleSendWithEmotion called with:', JSON.stringify(content));
     await sendMessageToAgent(content, { detected_emotions: emotions, prosody });
   }
 
   // Core message handling with optional emotional context
   async function sendMessageToAgent(content: string, emotionalContext?: EmotionalContext) {
-    if (!content.trim()) return;
+    console.log('sendMessageToAgent received:', JSON.stringify(content), 'length:', content?.length);
+    if (!content.trim()) {
+      console.log('Content empty after trim, returning');
+      return;
+    }
 
     // Add visitor message
     const visitorMessage: Message = {
@@ -162,6 +168,7 @@ export function MixingDesk() {
       timestamp: new Date(),
     };
 
+    console.log('Adding visitor message:', JSON.stringify(visitorMessage));
     setMessages(prev => [...prev, visitorMessage]);
 
     // Check if agent is ready
@@ -253,8 +260,8 @@ export function MixingDesk() {
           <div className="flex items-center gap-4">
             <h1 className="text-xl font-semibold text-gray-100">
               Mixing Desk
-              <span className="ml-2 text-sm font-normal text-gray-400">
-                Operation Basecamp • Phase C
+              <span className="ml-2 text-sm font-normal text-blue-400">
+                Operation Basecamp • Phase C • v1.1
               </span>
               {agentOS && (
                 <span className="ml-2 text-xs font-normal text-green-400">

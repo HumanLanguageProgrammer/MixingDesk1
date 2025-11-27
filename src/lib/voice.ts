@@ -4,6 +4,14 @@
 import type { STTResponse, EmotionalDelivery } from '../types';
 
 /**
+ * Convert blob to Uint8Array for debugging
+ */
+async function blobToBytes(blob: Blob): Promise<Uint8Array> {
+  const arrayBuffer = await blob.arrayBuffer();
+  return new Uint8Array(arrayBuffer);
+}
+
+/**
  * Convert blob to base64
  */
 async function blobToBase64(blob: Blob): Promise<string> {
@@ -24,13 +32,32 @@ async function blobToBase64(blob: Blob): Promise<string> {
  * Send audio for speech-to-text processing with emotion detection
  */
 export async function speechToText(audioBlob: Blob): Promise<STTResponse> {
+  // Debug: Check raw bytes of the audio blob BEFORE base64 conversion
+  const rawBytes = await blobToBytes(audioBlob);
+  const magicBytesHex = Array.from(rawBytes.slice(0, 4))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+  const isValidWebm = magicBytesHex === '1a45dfa3';
+
+  console.log('Raw audio blob check:', {
+    size: audioBlob.size,
+    mimeType: audioBlob.type,
+    magicBytesHex,
+    isValidWebm,
+    firstBytes: Array.from(rawBytes.slice(0, 8)),
+  });
+
   // Convert blob to base64 for reliable serverless transmission
   const audioBase64 = await blobToBase64(audioBlob);
+
+  // Debug: Check first few chars of base64 (valid webm should start with "GkXf" or similar)
+  const base64Preview = audioBase64.substring(0, 20);
 
   console.log('Sending audio to STT:', {
     originalSize: audioBlob.size,
     base64Length: audioBase64.length,
     mimeType: audioBlob.type,
+    base64Preview: base64Preview,
   });
 
   const response = await fetch('/api/voice/stt', {
@@ -44,6 +71,7 @@ export async function speechToText(audioBlob: Blob): Promise<STTResponse> {
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({ error: 'STT processing failed' }));
+    console.error('STT API error response:', error);
     throw new Error(error.details || error.error || 'STT processing failed');
   }
 
