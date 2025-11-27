@@ -1,15 +1,13 @@
 // src/components/Turntable2.tsx
-
-import type { LibraryItem } from '../types';
+// PHASE B: Agent-controlled content display (no manual selector)
 
 interface Turntable2Props {
   content: string;
-  libraryItems: LibraryItem[];
-  onSelectItem: (item: LibraryItem) => void;
+  title?: string;
   isLoading: boolean;
 }
 
-export function Turntable2({ content, libraryItems, onSelectItem, isLoading }: Turntable2Props) {
+export function Turntable2({ content, title, isLoading }: Turntable2Props) {
   return (
     <div className="h-full bg-gray-800 rounded-lg border border-gray-700 flex flex-col">
       {/* Header */}
@@ -28,32 +26,21 @@ export function Turntable2({ content, libraryItems, onSelectItem, isLoading }: T
           </div>
         ) : content ? (
           <div className="prose prose-invert prose-sm max-w-none">
+            {title && (
+              <h3 className="text-lg font-semibold text-gray-200 mb-3">{title}</h3>
+            )}
             <p className="text-gray-300 whitespace-pre-wrap">{content}</p>
           </div>
         ) : (
           <div className="text-gray-500 text-center py-8">
+            <svg className="w-16 h-16 mx-auto mb-2 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
             <p className="text-sm">No content loaded</p>
+            <p className="text-xs mt-1 text-gray-600">Agent will display content here</p>
           </div>
         )}
       </div>
-
-      {/* Library Item Selector (for testing) */}
-      {libraryItems.length > 0 && (
-        <div className="border-t border-gray-700 p-3">
-          <p className="text-xs text-gray-500 mb-2">Library Items (test selector):</p>
-          <div className="flex flex-wrap gap-2">
-            {libraryItems.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => onSelectItem(item)}
-                className="px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 rounded transition-colors"
-              >
-                {item.title}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
