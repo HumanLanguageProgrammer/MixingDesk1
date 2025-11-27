@@ -154,13 +154,13 @@ export function Microphone({
         {/* Help text */}
         <p className="mt-2 text-xs text-gray-500">
           {isRecording
-            ? 'Release to send voice message'
+            ? 'Click the mic button again to stop and send'
             : isProcessingSTT
               ? 'Processing your voice...'
               : disabled
                 ? 'Agent initializing...'
                 : voiceEnabled
-                  ? 'Press Enter to send text, or hold the mic button to speak'
+                  ? 'Press Enter to send text, or click the mic to record'
                   : 'Press Enter to send, Shift+Enter for new line'
           }
         </p>
