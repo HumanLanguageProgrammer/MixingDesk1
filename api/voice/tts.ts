@@ -94,15 +94,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     // Call Hume TTS API
-    // Using the Octave TTS endpoint
-    // Note: The /v0/tts/file endpoint doesn't accept voice selection - uses default voice
+    // Voice is specified inside the first utterance (by id or name)
+    // See: https://dev.hume.ai/docs/text-to-speech-tts/voices
+    const utterance: Record<string, unknown> = {
+      text: text,
+      description: `Speak with a ${emotional_delivery?.tone || 'warm'} tone`,
+    };
+
+    // Add voice specification if voice ID is provided
+    if (humeVoiceId) {
+      utterance.voice = {
+        id: humeVoiceId,
+      };
+    }
+
     const requestBody = {
-      utterances: [
-        {
-          text: text,
-          description: `Speak with a ${emotional_delivery?.tone || 'warm'} tone`,
-        }
-      ],
+      utterances: [utterance],
       format: {
         type: 'mp3',
       },
@@ -111,6 +118,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.log('Calling Hume TTS API:', {
       url: 'https://api.hume.ai/v0/tts/file',
       textLength: text.length,
+      voiceId: humeVoiceId,
       requestBody: JSON.stringify(requestBody),
     });
 
