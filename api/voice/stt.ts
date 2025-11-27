@@ -75,20 +75,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     // Create a File object from the buffer using OpenAI's toFile helper
-    const file = await toFile(audioBuffer, filename, { type: cleanMimeType });
+    // Convert Buffer to Uint8Array for proper type compatibility
+    const uint8Array = new Uint8Array(audioBuffer.buffer, audioBuffer.byteOffset, audioBuffer.byteLength);
+    const file = await toFile(uint8Array, filename, { type: cleanMimeType });
 
     // Call Whisper API using the official SDK
     const transcription = await openai.audio.transcriptions.create({
       file,
       model: 'whisper-1',
-      response_format: 'verbose_json',
     });
 
     const processingTime = Date.now() - startTime;
 
     console.log('Whisper transcription complete:', {
       text: transcription.text?.substring(0, 50) + '...',
-      duration: transcription.duration,
       processingTime: `${processingTime}ms`
     });
 
@@ -96,7 +96,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const response: STTResponse = {
       text: transcription.text || '',
       confidence: 0.95, // Whisper doesn't provide confidence scores, using high default
-      duration_ms: Math.round((transcription.duration || 0) * 1000),
+      duration_ms: processingTime,
     };
 
     // Return empty text handling
