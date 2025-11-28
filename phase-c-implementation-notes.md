@@ -12,34 +12,35 @@ These notes capture critical implementation learnings from the Phase C prototype
 
 ## Key Architectural Changes from Spec
 
-### 1. Speech-to-Text: Full Hume AI (Updated Nov 28)
+### 1. Speech-to-Text: OpenAI Whisper (Final Decision Nov 28)
 
-**We now use Hume AI for BOTH STT and TTS - achieving full Hume voice integration:**
+**Architecture: Use the right tool for each job**
 
 ```yaml
-STT: Hume AI Expression Measurement API (Batch)
-  - Endpoint: client.expressionMeasurement.batch.startInferenceJobFromLocalFile()
-  - Models: prosody + language (with transcription enabled)
-  - Provides: Transcription + 48 prosody emotions + 53 language emotions
-  - Polling: Job-based async with ~500ms poll interval
-  - Typical latency: 3-8 seconds for short recordings
+STT: OpenAI Whisper API
+  - Endpoint: openai.audio.transcriptions.create()
+  - Model: whisper-1
+  - Provides: Fast, reliable transcription
+  - Latency: ~1-2 seconds
+  - Simplicity: Simple REST API, battle-tested
 
 TTS: Hume AI Octave
   - Endpoint: POST https://api.hume.ai/v0/tts/file
-  - Provides emotional/expressive voice output
+  - Provides: Emotional/expressive voice output
   - Custom voice selection supported
 ```
 
 **Evolution:**
 1. Initial spec: Hume for both STT and TTS
-2. First implementation (Nov 27): OpenAI Whisper for STT (simpler, faster)
-3. Final implementation (Nov 28): Full Hume for both (enables emotion detection)
+2. Nov 27: OpenAI Whisper for STT (simpler, faster) ✅
+3. Nov 28: Attempted full Hume for STT (emotion detection)
+4. Nov 28: Reverted to Whisper - Hume Expression Measurement API not designed for production STT
 
-**Why Full Hume:**
-- Emotion detection from visitor's voice (prosody model)
-- Emotion analysis of transcribed text (language model)
-- Single provider for voice stack (simpler architecture)
-- Enables Claude to respond with emotional awareness
+**Why Whisper + Hume TTS:**
+- Whisper: Designed for transcription, fast, reliable, simple API
+- Hume Expression Measurement: Designed for emotion analysis, not real-time STT
+- Using tools for their intended purpose = ninja mode
+- Hume TTS still provides emotional expression for output
 
 ---
 
@@ -169,7 +170,10 @@ When voice features aren't working, check in order:
 ## Environment Variables
 
 ```bash
-# Voice - Hume AI (BOTH STT and TTS)
+# STT - OpenAI Whisper
+OPENAI_API_KEY=sk-...
+
+# TTS - Hume AI
 HUME_API_KEY=...
 HUME_VOICE_ID=63258ccf-...  # UUID format
 
@@ -179,9 +183,6 @@ ANTHROPIC_API_KEY=...
 # Feature flag
 VITE_VOICE_ENABLED=true
 ```
-
-**Note:** As of Nov 28, we no longer need OPENAI_API_KEY for voice features.
-The entire voice stack runs on Hume AI.
 
 ---
 
@@ -203,79 +204,45 @@ The entire voice stack runs on Hume AI.
 ┌─────────────────────┐       ┌─────────────────────┐
 │   /api/voice/stt    │       │   /api/voice/tts    │
 │                     │       │                     │
-│  Hume Expression    │       │  Hume AI Octave     │
-│  Measurement API    │       │  - /v0/tts/file     │
-│  - prosody model    │       │  - voice in utterance│
-│  - language model   │       │  - emotional delivery│
-│  - transcription    │       │                     │
+│  OpenAI Whisper     │       │  Hume AI Octave     │
+│  - toFile() helper  │       │  - /v0/tts/file     │
+│  - whisper-1 model  │       │  - voice in utterance│
+│  - Fast & reliable  │       │  - emotional delivery│
 └─────────────────────┘       └─────────────────────┘
          │                               │
          ▼                               ▼
-┌─────────────────────────────────────────────────────────┐
-│                    Hume AI API                           │
-│  ┌─────────────────────┐   ┌─────────────────────────┐  │
-│  │ Expression          │   │ Octave TTS              │  │
-│  │ Measurement (Batch) │   │ /v0/tts/file            │  │
-│  │ - Transcription     │   │ - Expressive synthesis  │  │
-│  │ - Prosody emotions  │   │ - Voice selection       │  │
-│  │ - Language emotions │   │ - Emotion controls      │  │
-│  └─────────────────────┘   └─────────────────────────┘  │
-└─────────────────────────────────────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────────────────┐
-│                  /api/agent/chat                         │
-│  ┌─────────────────────────────────────────────────┐    │
-│  │ Anthropic Claude with:                           │    │
-│  │ - Emotional context from visitor's voice         │    │
-│  │ - set_emotional_delivery tool                    │    │
-│  │ - Agency to respond with appropriate emotion     │    │
-│  └─────────────────────────────────────────────────┘    │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────┐       ┌─────────────────────┐
+│  OpenAI API         │       │  Hume AI API        │
+│  - Transcription    │       │  - TTS synthesis    │
+│  - ~1-2s latency    │       │  - Emotional voice  │
+└─────────────────────┘       └─────────────────────┘
 ```
 
 ---
 
 ## Code Snippets for Reference
 
-### Working STT Endpoint (Key Parts) - Updated Nov 28
+### Working STT Endpoint (Key Parts)
 
 ```typescript
 // api/voice/stt.ts
-import { HumeClient } from 'hume';
+import OpenAI, { toFile } from 'openai';
 
 // Decode base64 audio from client
 const audioBuffer = Buffer.from(audio, 'base64');
 
-// Create file for Hume API
-const audioBlob = new Blob([audioBuffer], { type: 'audio/webm' });
-const audioFile = new File([audioBlob], 'recording.webm', { type: 'audio/webm' });
+// Use toFile helper (NOT native File class)
+const file = await toFile(
+  new Uint8Array(audioBuffer.buffer, audioBuffer.byteOffset, audioBuffer.length),
+  'audio.webm',
+  { type: 'audio/webm' }
+);
 
-// Initialize Hume client
-const client = new HumeClient({ apiKey: humeApiKey });
-
-// Start batch inference job with prosody + language models
-const jobResponse = await client.expressionMeasurement.batch.startInferenceJobFromLocalFile({
-  file: [audioFile],
-  json: JSON.stringify({
-    models: {
-      prosody: {},  // 48 emotion dimensions from voice
-      language: { granularity: 'passage' },  // Emotion from transcribed text
-    },
-    transcription: {
-      language: 'en',
-      identifySpeakers: false,
-      confidenceThreshold: 0.5,
-    },
-  }),
+// Call Whisper
+const transcription = await openai.audio.transcriptions.create({
+  file,
+  model: 'whisper-1',
 });
-
-// Poll for completion
-const jobId = jobResponse.data?.jobId;
-// ... poll until COMPLETED ...
-
-// Get predictions (includes transcription + emotions)
-const predictions = await client.expressionMeasurement.batch.getJobPredictions(jobId);
 ```
 
 ### Working TTS Endpoint (Key Parts)
@@ -329,24 +296,23 @@ const startRecording = async () => {
 | # | Issue | Solution |
 |---|-------|----------|
 | 1 | WebM header missing | Don't use timeslice in MediaRecorder.start() |
-| 2 | Node.js File class fails | Use standard Blob/File API in Vercel (Hume SDK compatible) |
+| 2 | Node.js File class fails | Use OpenAI's toFile() helper |
 | 3 | Hume voice not working | Put voice object inside utterance, not top level |
 | 4 | Recording too short | Use click-to-toggle, not push-to-talk |
-| 5 | Full Hume STT | Use Expression Measurement batch API with prosody + language + transcription |
+| 5 | Wrong tool for job | Use Whisper for STT (fast), Hume for TTS (expressive) |
 
 ---
 
-## Workarounds Resolved (Nov 28)
-
-The following temporary workarounds from Nov 27 have been resolved:
+## Lessons Learned (Nov 28)
 
 1. **Agent fallback removed** - Anthropic API billing fallback in chat.ts has been removed. The agent now uses the real API without fallback.
 
-2. **Full Hume STT implemented** - OpenAI Whisper has been replaced with Hume Expression Measurement API, providing:
-   - Transcription with confidence scores
-   - Prosody emotion detection (48 dimensions)
-   - Language emotion detection (53 dimensions)
-   - Single provider for entire voice stack
+2. **Use tools for their intended purpose:**
+   - Hume Expression Measurement API = emotion analysis (not production STT)
+   - OpenAI Whisper = fast, reliable transcription
+   - Hume Octave = expressive TTS
+   - Fighting the tool = "tank in a swamp"
+   - Using the right tool = "ninja mode"
 
 ---
 
@@ -355,9 +321,8 @@ The following temporary workarounds from Nov 27 have been resolved:
 1. **Remove debug logging** - Clean up console.log statements
 2. ~~**Remove test fallback**~~ - ✅ DONE (Nov 28)
 3. **Add error recovery** - Graceful fallback when TTS fails (show text only)
-4. **Optimize latency** - Consider streaming TTS for faster response; current STT latency is 3-8 seconds due to batch job polling
-5. ~~**Add emotion detection**~~ - ✅ DONE (Nov 28) - Full emotion detection now available from Hume STT
-6. **Add thinking indicator** - Show "agent is thinking" UI during processing latency
+4. **Add thinking indicator** - Show "agent is thinking" UI during processing latency
+5. **Consider Deepgram** - For even lower latency STT in production build
 
 ---
 
