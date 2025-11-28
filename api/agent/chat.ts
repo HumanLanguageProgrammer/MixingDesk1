@@ -195,7 +195,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'systemPrompt is required' });
     }
 
-    console.log('Processing chat request with', messages.length, 'messages');
+    // Filter out messages with empty content (Claude API requires non-empty content)
+    // This handles edge cases like empty transcriptions or placeholder messages
+    const validMessages = messages.filter(
+      (m: { role: string; content: string }) => m.content && m.content.trim().length > 0
+    );
+
+    if (validMessages.length === 0) {
+      return res.status(400).json({
+        error: 'No valid messages',
+        details: 'All messages were empty. Please provide at least one message with content.'
+      });
+    }
+
+    console.log('Processing chat request with', validMessages.length, 'valid messages (filtered from', messages.length, ')');
 
     // Phase C: Enhance system prompt with emotional context if provided
     let enhancedSystemPrompt = systemPrompt;
@@ -230,7 +243,7 @@ Use the set_emotional_delivery tool to specify how your response should be spoke
       max_tokens: 1024,
       system: enhancedSystemPrompt,
       tools: tools,
-      messages: messages,
+      messages: validMessages,
     });
 
     // Collect tool results to send back to UI
@@ -285,7 +298,7 @@ Use the set_emotional_delivery tool to specify how your response should be spoke
         system: enhancedSystemPrompt,
         tools: tools,
         messages: [
-          ...messages,
+          ...validMessages,
           { role: 'assistant', content: response.content },
           { role: 'user', content: toolResults },
         ],

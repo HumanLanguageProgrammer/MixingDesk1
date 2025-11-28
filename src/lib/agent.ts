@@ -67,10 +67,13 @@ export async function sendMessage(
 
 /**
  * Convert our Message format to Claude's ChatMessage format
+ * Filters out empty messages to prevent API errors
  */
 export function toClaudeMessages(messages: Array<{ speaker: string; content: string }>): ChatMessage[] {
-  return messages.map(m => ({
-    role: m.speaker === 'visitor' ? 'user' : 'assistant',
-    content: m.content,
-  }));
+  return messages
+    .filter(m => m.content && m.content.trim().length > 0)
+    .map(m => ({
+      role: m.speaker === 'visitor' ? 'user' : 'assistant',
+      content: m.content,
+    }));
 }
