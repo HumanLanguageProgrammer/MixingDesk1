@@ -210,7 +210,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         models: {
           prosody: {},  // Speech prosody (48 emotion dimensions from voice)
           language: {
-            granularity: 'passage',  // Get overall emotion for the whole message
+            granularity: 'conversational_turn',  // Get overall emotion for the whole message
           },
         },
         transcription: {
