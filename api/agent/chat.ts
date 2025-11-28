@@ -307,21 +307,6 @@ Use the set_emotional_delivery tool to specify how your response should be spoke
     console.error('Chat error:', error);
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
-    // TEMPORARY: Return a test response for TTS testing when Anthropic fails
-    // Remove this block once Anthropic API is working again
-    if (errorMessage.includes('credit') || errorMessage.includes('balance') || errorMessage.includes('billing')) {
-      console.log('Anthropic API billing issue - returning test response for TTS testing');
-      return res.status(200).json({
-        message: "Hello! I'm responding with a test message because the main API is temporarily unavailable. This message is being used to test the text-to-speech functionality. How does it sound?",
-        tool_results: [],
-        emotional_delivery: {
-          tone: 'warm',
-          intensity: 0.7,
-          pacing: 'normal',
-        },
-      });
-    }
-
     return res.status(500).json({
       error: 'Internal server error',
       details: errorMessage,

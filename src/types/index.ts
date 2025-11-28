@@ -151,13 +151,13 @@ export interface ProsodyAnalysis {
   volume: 'quiet' | 'normal' | 'loud';
 }
 
-// STT Response (simplified - Whisper provides transcription only)
-// Emotion analysis is optional and only present if using an emotion-aware STT service
+// STT Response from Hume AI Expression Measurement API
+// Provides transcription + emotion detection from voice
 export interface STTResponse {
   text: string;
   confidence: number;
   duration_ms: number;
-  // Optional - not provided by Whisper, only by emotion-aware services
+  // Hume provides 48 prosody emotions and 53 language emotions
   emotions?: EmotionAnalysis;
   prosody?: ProsodyAnalysis;
 }
