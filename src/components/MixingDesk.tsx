@@ -1,7 +1,8 @@
 // src/components/MixingDesk.tsx
-// PHASE C: Integrated with voice and emotional agency
+// PHASE D: Integrated with visit lifecycle and routing
 
 import { useState, useEffect, useCallback } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { Turntable1 } from './Turntable1';
 import { Turntable2 } from './Turntable2';
 import { Microphone } from './Microphone';
@@ -9,6 +10,7 @@ import { MessageHistory } from './MessageHistory';
 import { StatusIndicator } from './StatusIndicator';
 import { useAgent } from '../hooks/useAgent';
 import { useVoice } from '../hooks/useVoice';
+import { useVisit } from '../hooks/useVisit';
 import {
   testConnection,
   listStorageFiles
@@ -25,7 +27,26 @@ import type {
 } from '../types';
 
 export function MixingDesk() {
-  // Agent state
+  // Phase D: Get visit ID from URL params
+  const { visitId } = useParams<{ visitId: string }>();
+  const navigate = useNavigate();
+
+  // Phase D: Load visit context
+  const { visit, addNote } = useVisit(visitId);
+
+  // Phase D: Handle agent navigation request
+  const handleAgentNavigation = useCallback((destination: string) => {
+    if (destination === 'checkout' && visitId) {
+      navigate(`/checkout/${visitId}`);
+    }
+  }, [visitId, navigate]);
+
+  // Phase D: Handle agent adding a note
+  const handleAgentAddNote = useCallback((content: string) => {
+    addNote('agent', content);
+  }, [addNote]);
+
+  // Agent state (Phase D: with visit context)
   const {
     isInitialized: agentInitialized,
     isLoading: agentLoading,
@@ -35,7 +56,12 @@ export function MixingDesk() {
     chat,
     chatWithEmotion,
     clearError
-  } = useAgent();
+  } = useAgent({
+    visitId,
+    visitNotes: visit?.notes || [],
+    onNavigate: handleAgentNavigation,
+    onAddNote: handleAgentAddNote,
+  });
 
   // Voice state (Phase C)
   const {
@@ -261,11 +287,16 @@ export function MixingDesk() {
             <h1 className="text-xl font-semibold text-gray-100">
               Mixing Desk
               <span className="ml-2 text-sm font-normal text-blue-400">
-                Operation Basecamp • Phase C • v1.1
+                Operation Basecamp - Phase D - v1.0
               </span>
               {agentOS && (
                 <span className="ml-2 text-xs font-normal text-green-400">
                   ({agentOS.agent_name} v{agentOS.version})
+                </span>
+              )}
+              {visit?.visitor_name && (
+                <span className="ml-2 text-xs font-normal text-purple-400">
+                  - {visit.visitor_name}
                 </span>
               )}
             </h1>

@@ -1,15 +1,24 @@
 // src/hooks/useAgent.ts
 // React hook for agent state management
 // Phase C: Updated with emotional context support
+// Phase D: Updated with visit lifecycle support
 
 import { useState, useCallback } from 'react';
 import { initializeAgent, sendMessage, toClaudeMessages } from '../lib/agent';
-import type { AgentOS, Message, ToolExecutionResult, EmotionalDelivery, EmotionalContext } from '../types';
+import type { AgentOS, Message, ToolExecutionResult, EmotionalDelivery, EmotionalContext, VisitNote } from '../types';
 
 export interface ChatResult {
   response: string;
   toolResults: ToolExecutionResult[];
   emotionalDelivery?: EmotionalDelivery;  // Phase C
+}
+
+// Phase D: Props for useAgent hook
+export interface UseAgentProps {
+  visitId?: string;
+  visitNotes?: VisitNote[];
+  onNavigate?: (destination: string) => void;
+  onAddNote?: (content: string) => void;
 }
 
 export interface UseAgentReturn {
@@ -30,7 +39,8 @@ export interface UseAgentReturn {
   clearError: () => void;
 }
 
-export function useAgent(): UseAgentReturn {
+export function useAgent(props: UseAgentProps = {}): UseAgentReturn {
+  const { visitId, visitNotes, onNavigate, onAddNote } = props;
   const [isInitialized, setIsInitialized] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -74,12 +84,37 @@ export function useAgent(): UseAgentReturn {
       // Add current user message
       claudeMessages.push({ role: 'user', content: userMessage });
 
-      // Send to agent (with or without emotional context)
+      // Phase D: Build visit context if available
+      const visitContext = visitId && visitNotes ? { visitId, visitNotes } : undefined;
+
+      // Send to agent (with or without emotional context and visit context)
       const { message, tool_results, emotional_delivery } = await sendMessage(
         claudeMessages,
         agentOS.os_content,
-        emotionalContext
+        emotionalContext,
+        visitContext
       );
+
+      // Phase D: Process visit-related tool results
+      if (tool_results) {
+        for (const result of tool_results) {
+          if (result.success && result.data) {
+            // Handle add_visit_note action
+            if (result.data.action === 'add_visit_note' && result.data.content && onAddNote) {
+              onAddNote(result.data.content as string);
+            }
+            // Handle end_session action
+            if (result.data.action === 'end_session' && onNavigate) {
+              // Add summary note if provided
+              if (result.data.summary && onAddNote) {
+                onAddNote(`Session summary: ${result.data.summary}`);
+              }
+              // Navigate to checkout
+              onNavigate('checkout');
+            }
+          }
+        }
+      }
 
       return {
         response: message,
@@ -93,7 +128,7 @@ export function useAgent(): UseAgentReturn {
     } finally {
       setIsLoading(false);
     }
-  }, [agentOS]);
+  }, [agentOS, visitId, visitNotes, onNavigate, onAddNote]);
 
   // Standard chat (no emotional context)
   const chat = useCallback(async (
