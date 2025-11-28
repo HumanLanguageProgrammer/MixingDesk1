@@ -139,19 +139,24 @@ function executeSetEmotionalDelivery(input: {
   };
 }
 
-// Execute a tool call
+// Execute a tool call with error handling
 async function executeTool(name: string, input: Record<string, unknown>, supabase: any) {
-  switch (name) {
-    case 'display_image':
-      return executeDisplayImage(input as { image_path: string }, supabase);
-    case 'display_content':
-      return executeDisplayContent(input as { content: string; title?: string });
-    case 'retrieve_library_item':
-      return executeRetrieveLibraryItem(input as { query: string }, supabase);
-    case 'set_emotional_delivery':
-      return executeSetEmotionalDelivery(input as { tone: string; intensity?: number; pacing?: string });
-    default:
-      return { success: false, error: `Unknown tool: ${name}` };
+  try {
+    switch (name) {
+      case 'display_image':
+        return executeDisplayImage(input as { image_path: string }, supabase);
+      case 'display_content':
+        return executeDisplayContent(input as { content: string; title?: string });
+      case 'retrieve_library_item':
+        return executeRetrieveLibraryItem(input as { query: string }, supabase);
+      case 'set_emotional_delivery':
+        return executeSetEmotionalDelivery(input as { tone: string; intensity?: number; pacing?: string });
+      default:
+        return { success: false, error: `Unknown tool: ${name}` };
+    }
+  } catch (err) {
+    console.error(`Tool execution error for ${name}:`, err);
+    return { success: false, error: err instanceof Error ? err.message : 'Tool execution failed' };
   }
 }
 
@@ -257,16 +262,30 @@ Use the set_emotional_delivery tool to specify how your response should be spoke
     // Phase C: Track emotional delivery choice
     let emotionalDelivery: EmotionalDelivery | undefined;
 
-    // Handle tool use loop
+    // Handle tool use loop with safety limit
+    const MAX_TOOL_ITERATIONS = 10;
+    let toolIterations = 0;
+
     while (response.stop_reason === 'tool_use') {
+      toolIterations++;
+      if (toolIterations > MAX_TOOL_ITERATIONS) {
+        console.error('Tool loop exceeded maximum iterations, breaking out');
+        break;
+      }
+
       const toolUseBlocks = response.content.filter(
         (block): block is Anthropic.ToolUseBlock => block.type === 'tool_use'
       );
 
+      console.log(`Tool iteration ${toolIterations}: Processing ${toolUseBlocks.length} tool(s):`,
+        toolUseBlocks.map(t => t.name).join(', '));
+
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
 
       for (const toolUse of toolUseBlocks) {
+        console.log(`Executing tool: ${toolUse.name}`, toolUse.input);
         const result = await executeTool(toolUse.name, toolUse.input as Record<string, unknown>, supabase);
+        console.log(`Tool ${toolUse.name} result:`, result.success ? 'success' : 'failed');
 
         // Phase C: Capture emotional delivery if set
         if (toolUse.name === 'set_emotional_delivery' && result.success) {
@@ -292,17 +311,24 @@ Use the set_emotional_delivery tool to specify how your response should be spoke
       }
 
       // Continue conversation with tool results
-      response = await anthropic.messages.create({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 1024,
-        system: enhancedSystemPrompt,
-        tools: tools,
-        messages: [
-          ...validMessages,
-          { role: 'assistant', content: response.content },
-          { role: 'user', content: toolResults },
-        ],
-      });
+      console.log('Continuing conversation with tool results...');
+      try {
+        response = await anthropic.messages.create({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1024,
+          system: enhancedSystemPrompt,
+          tools: tools,
+          messages: [
+            ...validMessages,
+            { role: 'assistant', content: response.content },
+            { role: 'user', content: toolResults },
+          ],
+        });
+        console.log('API response stop_reason:', response.stop_reason);
+      } catch (apiError) {
+        console.error('API error in tool loop:', apiError);
+        throw apiError;
+      }
     }
 
     // Extract final text response
@@ -310,8 +336,17 @@ Use the set_emotional_delivery tool to specify how your response should be spoke
       (block): block is Anthropic.TextBlock => block.type === 'text'
     );
 
+    const finalMessage = textContent?.text || '';
+    console.log('Final response:', {
+      hasTextContent: !!textContent,
+      messageLength: finalMessage.length,
+      toolResults: toolExecutionResults.length,
+      hasEmotionalDelivery: !!emotionalDelivery,
+      stopReason: response.stop_reason,
+    });
+
     return res.status(200).json({
-      message: textContent?.text || '',
+      message: finalMessage,
       tool_results: toolExecutionResults,
       emotional_delivery: emotionalDelivery,  // Phase C: Include emotional delivery
     });
