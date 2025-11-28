@@ -4,7 +4,6 @@
 
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { HumeClient } from 'hume';
-import { Readable } from 'stream';
 
 interface EmotionScore {
   name: string;
@@ -25,15 +24,6 @@ interface STTResponse {
     tone: 'hesitant' | 'neutral' | 'engaged' | 'excited';
     volume: 'quiet' | 'normal' | 'loud';
   };
-}
-
-// Helper: Convert base64 to readable stream
-function base64ToStream(base64: string, mimeType: string): Readable {
-  const buffer = Buffer.from(base64, 'base64');
-  const stream = new Readable();
-  stream.push(buffer);
-  stream.push(null);
-  return stream;
 }
 
 // Helper: Extract top emotions from Hume predictions
@@ -120,7 +110,8 @@ async function pollForJobCompletion(
 
   while (Date.now() - startTime < maxWaitMs) {
     const jobDetails = await client.expressionMeasurement.batch.getJobDetails(jobId);
-    const state = jobDetails.data?.state?.status;
+    // SDK returns UnionJob which has state.status
+    const state = (jobDetails as { state?: { status?: string } })?.state?.status;
 
     console.log('Job status:', state, 'elapsed:', Date.now() - startTime, 'ms');
 
@@ -215,7 +206,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Enable transcription for language analysis
     const jobResponse = await client.expressionMeasurement.batch.startInferenceJobFromLocalFile({
       file: [audioFile],
-      json: JSON.stringify({
+      json: {
         models: {
           prosody: {},  // Speech prosody (48 emotion dimensions from voice)
           language: {
@@ -227,10 +218,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           identifySpeakers: false,
           confidenceThreshold: 0.5,
         },
-      }),
+      },
     });
 
-    const jobId = jobResponse.data?.jobId;
+    // SDK returns JobId object with jobId property
+    const jobId = (jobResponse as { jobId?: string })?.jobId;
     if (!jobId) {
       throw new Error('Failed to get job ID from Hume API');
     }
@@ -256,9 +248,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // Get predictions
-    const predictions = await client.expressionMeasurement.batch.getJobPredictions(jobId);
-    const results = predictions.data;
+    // Get predictions - SDK returns array directly
+    const results = await client.expressionMeasurement.batch.getJobPredictions(jobId);
 
     console.log('Predictions received:', JSON.stringify(results, null, 2).substring(0, 500));
 
@@ -268,52 +259,51 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let languageEmotions: EmotionScore[] = [];
     let transcriptionConfidence = 0.9; // Default confidence
 
-    // Process prediction results
-    if (results && results.length > 0) {
+    // Process prediction results (results is UnionPredictResult[])
+    if (results && Array.isArray(results) && results.length > 0) {
       for (const result of results) {
-        // Check if this is a source predict result
-        if ('results' in result && result.results) {
-          const sourceResult = result.results;
+        // Check if this is a source predict result with results property
+        const sourceResult = result as { results?: { predictions?: unknown[] } };
+        if (sourceResult.results?.predictions) {
+          for (const prediction of sourceResult.results.predictions) {
+            const pred = prediction as {
+              prosody?: { predictions?: Array<{ emotions?: Array<{ name?: string; score?: number }> }> };
+              language?: { predictions?: Array<{ text?: string; emotions?: Array<{ name?: string; score?: number }> }> };
+              transcription?: { confidence?: number };
+            };
 
-          // Extract prosody predictions
-          if (sourceResult.predictions) {
-            for (const prediction of sourceResult.predictions) {
-              // Handle prosody
-              if ('prosody' in prediction && prediction.prosody?.predictions) {
-                for (const prosodyPred of prediction.prosody.predictions) {
-                  if (prosodyPred.emotions) {
-                    prosodyEmotions = prosodyPred.emotions.map((e: { name?: string; score?: number }) => ({
-                      name: e.name || '',
-                      score: e.score || 0,
-                    }));
-                  }
+            // Handle prosody
+            if (pred.prosody?.predictions) {
+              for (const prosodyPred of pred.prosody.predictions) {
+                if (prosodyPred.emotions) {
+                  prosodyEmotions = prosodyPred.emotions.map((e) => ({
+                    name: e.name || '',
+                    score: e.score || 0,
+                  }));
                 }
               }
+            }
 
-              // Handle language (includes transcription)
-              if ('language' in prediction && prediction.language?.predictions) {
-                for (const langPred of prediction.language.predictions) {
-                  // Get transcribed text
-                  if (langPred.text) {
-                    transcribedText += (transcribedText ? ' ' : '') + langPred.text;
-                  }
-                  // Get language emotions
-                  if (langPred.emotions) {
-                    languageEmotions = langPred.emotions.map((e: { name?: string; score?: number }) => ({
-                      name: e.name || '',
-                      score: e.score || 0,
-                    }));
-                  }
+            // Handle language (includes transcription)
+            if (pred.language?.predictions) {
+              for (const langPred of pred.language.predictions) {
+                // Get transcribed text
+                if (langPred.text) {
+                  transcribedText += (transcribedText ? ' ' : '') + langPred.text;
+                }
+                // Get language emotions
+                if (langPred.emotions) {
+                  languageEmotions = langPred.emotions.map((e) => ({
+                    name: e.name || '',
+                    score: e.score || 0,
+                  }));
                 }
               }
+            }
 
-              // Get transcription metadata if available
-              if ('transcription' in prediction && prediction.transcription) {
-                const meta = prediction.transcription as { confidence?: number };
-                if (meta.confidence !== undefined) {
-                  transcriptionConfidence = meta.confidence;
-                }
-              }
+            // Get transcription metadata if available
+            if (pred.transcription?.confidence !== undefined) {
+              transcriptionConfidence = pred.transcription.confidence;
             }
           }
         }
