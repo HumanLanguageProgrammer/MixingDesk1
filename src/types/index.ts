@@ -117,6 +117,11 @@ export interface ToolExecutionResult {
     content?: string;
     title?: string;
     library_items?: LibraryItem[];
+    // Phase D: Visit lifecycle tool data
+    action?: string;
+    summary?: string;
+    notes?: VisitNote[];
+    message?: string;
   };
   error?: string;
 }
@@ -204,4 +209,47 @@ export interface VoiceMessage extends Message {
 // Extended AgentResponse with emotional delivery
 export interface AgentResponseWithEmotion extends AgentResponse {
   emotional_delivery?: EmotionalDelivery;
+}
+
+// ============================================
+// Phase D: Visit Lifecycle and Routing
+// ============================================
+
+// Visit status enum
+export type VisitStatus = 'checking_in' | 'engaged' | 'checking_out' | 'complete';
+
+// Note source enum
+export type NoteSource = 'checkin' | 'agent' | 'vws' | 'checkout';
+
+// Individual visit note
+export interface VisitNote {
+  timestamp: string;
+  source: NoteSource;
+  content: string;
+}
+
+// Visit record from Supabase
+export interface Visit {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  visitor_name: string | null;
+  status: VisitStatus;
+  notes: VisitNote[];
+}
+
+// Create visit input
+export interface CreateVisitInput {
+  visitor_name?: string;
+  initial_note?: string;
+}
+
+// Update visit input
+export interface UpdateVisitInput {
+  visitor_name?: string;
+  status?: VisitStatus;
+  note?: {
+    source: NoteSource;
+    content: string;
+  };
 }

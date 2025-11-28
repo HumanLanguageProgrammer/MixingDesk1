@@ -78,6 +78,44 @@ const tools: Anthropic.Tool[] = [
       required: ['tone'],
     },
   },
+  // Phase D: Visit lifecycle tools
+  {
+    name: 'read_visit_notes',
+    description: 'Read all notes from the current visit. Use this to see what was discussed at check-in or earlier in the session.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {},
+      required: [],
+    },
+  },
+  {
+    name: 'add_visit_note',
+    description: 'Add a note to the visit record. Use this to record important moments or key learnings from the conversation.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        content: {
+          type: 'string',
+          description: 'The note content to record',
+        },
+      },
+      required: ['content'],
+    },
+  },
+  {
+    name: 'end_session',
+    description: 'End the current session and take the visitor to check-out. Use this when the conversation has reached a natural conclusion.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        summary: {
+          type: 'string',
+          description: 'Brief summary of what was accomplished in this session',
+        },
+      },
+      required: [],
+    },
+  },
 ];
 
 // Tool execution functions
@@ -139,8 +177,48 @@ function executeSetEmotionalDelivery(input: {
   };
 }
 
+// Phase D: Visit lifecycle tool execution
+interface VisitNote {
+  timestamp: string;
+  source: string;
+  content: string;
+}
+
+function executeReadVisitNotes(visitNotes: VisitNote[]): { success: boolean; notes: VisitNote[]; message: string } {
+  return {
+    success: true,
+    notes: visitNotes,
+    message: visitNotes.length > 0
+      ? `Found ${visitNotes.length} note(s) from this visit.`
+      : 'No notes recorded yet for this visit.',
+  };
+}
+
+function executeAddVisitNote(input: { content: string }): { success: boolean; action: string; content: string } {
+  // This returns a marker that the client will use to actually add the note
+  return {
+    success: true,
+    action: 'add_visit_note',
+    content: input.content,
+  };
+}
+
+function executeEndSession(input: { summary?: string }): { success: boolean; action: string; summary?: string } {
+  // This returns a marker that the client will use to navigate
+  return {
+    success: true,
+    action: 'end_session',
+    summary: input.summary,
+  };
+}
+
 // Execute a tool call with error handling
-async function executeTool(name: string, input: Record<string, unknown>, supabase: any) {
+async function executeTool(
+  name: string,
+  input: Record<string, unknown>,
+  supabase: any,
+  visitNotes: VisitNote[] = []
+) {
   try {
     switch (name) {
       case 'display_image':
@@ -151,6 +229,13 @@ async function executeTool(name: string, input: Record<string, unknown>, supabas
         return executeRetrieveLibraryItem(input as { query: string }, supabase);
       case 'set_emotional_delivery':
         return executeSetEmotionalDelivery(input as { tone: string; intensity?: number; pacing?: string });
+      // Phase D: Visit lifecycle tools
+      case 'read_visit_notes':
+        return executeReadVisitNotes(visitNotes);
+      case 'add_visit_note':
+        return executeAddVisitNote(input as { content: string });
+      case 'end_session':
+        return executeEndSession(input as { summary?: string });
       default:
         return { success: false, error: `Unknown tool: ${name}` };
     }
@@ -190,7 +275,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const anthropic = new Anthropic({ apiKey: anthropicKey });
     const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
-    const { messages, systemPrompt, emotionalContext } = req.body;
+    const { messages, systemPrompt, emotionalContext, visitId, visitNotes } = req.body;
 
     if (!messages || !Array.isArray(messages)) {
       return res.status(400).json({ error: 'messages array is required' });
@@ -242,6 +327,26 @@ Remember: You have emotional agency. You can choose to:
 Use the set_emotional_delivery tool to specify how your response should be spoken.`;
     }
 
+    // Phase D: Enhance system prompt with visit context if provided
+    if (visitId && visitNotes && visitNotes.length > 0) {
+      const visitorName = visitNotes[0]?.source === 'checkin' ? '' : ''; // Could extract from notes if needed
+      enhancedSystemPrompt += `
+
+## Current Visit Context
+
+This visitor is in an active session (Visit ID: ${visitId.slice(0, 8)}...).
+
+Visit notes so far:
+${visitNotes.map((note: VisitNote) => `- [${note.source}] ${note.content}`).join('\n')}
+
+You have access to visit lifecycle tools:
+- read_visit_notes: Review what was discussed at check-in or earlier
+- add_visit_note: Record important moments or learnings
+- end_session: Navigate to check-out when the conversation concludes
+
+Use the visitor's check-in context to personalize your responses.`;
+    }
+
     // Call Claude API
     let response = await anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
@@ -284,7 +389,7 @@ Use the set_emotional_delivery tool to specify how your response should be spoke
 
       for (const toolUse of toolUseBlocks) {
         console.log(`Executing tool: ${toolUse.name}`, toolUse.input);
-        const result = await executeTool(toolUse.name, toolUse.input as Record<string, unknown>, supabase);
+        const result = await executeTool(toolUse.name, toolUse.input as Record<string, unknown>, supabase, visitNotes || []);
         console.log(`Tool ${toolUse.name} result:`, result.success ? 'success' : 'failed');
 
         // Phase C: Capture emotional delivery if set
